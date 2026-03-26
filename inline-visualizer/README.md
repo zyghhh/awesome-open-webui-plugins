@@ -71,8 +71,7 @@ Tested with Claude Haiku 4.5, Claude Opus 4.5, Claude Opus 4.6, Gemini 3 Flash P
 ### 4. Enable Same-Origin Access
 
 > [!IMPORTANT]
-> **COMPLETELY OPTIONAL**
-> As of **Open WebUI 0.8.11**, interactive buttons that send prompts back to the chat (`sendPrompt`) work **without** enabling same-origin. A confirmation dialog will appear each time, letting you review the prompt before it is submitted.
+> **COMPLETELY OPTIONAL** - As of **Open WebUI 0.8.11**, interactive buttons that send prompts back to the chat (`sendPrompt`) work **without** enabling same-origin. A confirmation dialog will appear each time, letting you review the prompt before it is submitted.
 > Same-origin access is only required if you want to **auto-submit** without confirmation.
 
 If you prefer **auto-submit without confirmation**, enable same-origin:
