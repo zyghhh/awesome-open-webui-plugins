@@ -1,8 +1,8 @@
 """
 title: MCP App Bridge
 author: Classic298
-version: 0.4.0
-description: Proof of concept — wraps MCP server tools and renders MCP App UI resources (ui://) as Rich UI embeds using Open WebUI's existing embed system. Spec-compliant: honors server-declared CSP, dispatches ui/notifications/tool-result for AppBridge SDK compatibility. No middleware changes needed.
+version: 0.4.1
+description: Wraps MCP server tools and renders MCP App UI resources (ui://) as Rich UI embeds using Open WebUI's existing embed system. Spec-compliant: honors server-declared CSP, dispatches ui/notifications/tool-result for AppBridge SDK compatibility. No middleware changes needed.
 """
 
 import json
@@ -162,19 +162,19 @@ async def _connect_mcp(url: str, headers: dict | None) -> tuple[AsyncExitStack, 
 
 
 class Tools:
-    """MCP App Bridge — renders MCP App UI resources as Rich UI embeds.
+    """MCP App Bridge — discover and execute remote MCP tools.
 
-    Configure the MCP server URL and optional auth token via Valves,
-    then the model can discover and call MCP tools. If a tool declares
-    a ``ui://`` resource, the HTML is fetched and rendered inline.
+    YOU CAN EXECUTE MCP TOOLS. This is a two-step workflow:
+      1. ``list_mcp_tools`` — discover what tools the MCP server offers.
+      2. ``call_mcp_tool`` — execute a tool by name. If it has a UI,
+         the result is rendered visually for the user (charts, viewers, etc.).
 
-    When the user asks about a capability you don't natively have
-    (e.g. viewing files, running diagnostics, visualizations), use
-    ``list_mcp_tools`` to check whether the MCP server provides a
-    matching tool before telling the user you can't do it.
-
-    Security: honors server-declared CSP (``_meta.ui.csp``) and
-    permissions (``_meta.ui.permissions``) per the MCP Apps spec.
+    IMPORTANT: When the user asks you to do something you don't have a
+    built-in tool for (e.g. "view the DICOM", "show the chart",
+    "run diagnostics"), ALWAYS call ``list_mcp_tools`` first to check
+    if the MCP server provides it, then call ``call_mcp_tool`` to
+    execute it. Do NOT tell the user you cannot do it — try the MCP
+    server first.
     """
 
     class Valves(BaseModel):
@@ -197,10 +197,9 @@ class Tools:
 
     async def list_mcp_tools(self) -> str:
         """
-        List all tools available on the configured MCP server.
-        Shows name, description, and whether each tool has a UI resource.
-        Call this first when the user references a capability you don't
-        have built-in — the MCP server may provide it as a tool.
+        Discover available MCP tools. Call this FIRST when the user asks
+        for a capability you don't have built-in. After discovering a
+        matching tool, immediately call ``call_mcp_tool`` to execute it.
 
         :return: JSON list of available tools with their metadata.
         """
@@ -230,20 +229,17 @@ class Tools:
         arguments: str = "{}",
     ) -> str | HTMLResponse:
         """
-        Call a tool on the configured MCP server.
+        Execute an MCP tool by name. Use this after ``list_mcp_tools``
+        to actually run a discovered tool. If the tool has a UI, the
+        result is rendered as an interactive visual embed (viewer, chart,
+        dashboard, etc.) directly in the chat. If no UI, returns text.
 
-        If the tool declares a UI resource (MCP Apps extension, ui:// URI),
-        the HTML is fetched and rendered inline as a Rich UI embed —
-        exactly like the Inline Visualizer renders its output.
+        You SHOULD call this whenever a user asks you to use or run an
+        MCP tool — do not tell the user you cannot execute it.
 
-        Security is enforced via the server's declared CSP policy, which is
-        injected as a <meta> Content-Security-Policy tag per the MCP Apps spec.
-
-        If the tool has no UI resource, returns the plain text result.
-
-        :param tool_name: Name of the MCP tool to call.
+        :param tool_name: Name of the MCP tool to call (from list_mcp_tools).
         :param arguments: JSON string of tool arguments.
-        :return: Rich UI embed with the MCP App HTML, or plain text result.
+        :return: Visual UI embed or plain text result.
         """
         args = json.loads(arguments) if isinstance(arguments, str) else arguments
 
