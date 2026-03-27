@@ -199,8 +199,11 @@ class Tools:
 
     async def list_mcp_tools(self) -> str:
         """
-        Returns a list of extra tools you can use. After calling this,
-        pick the matching tool and call ``call_mcp_tool`` with its name.
+        Returns a list of extra tools you can use via ``call_mcp_tool``.
+        When the user asks for something you don't have a built-in tool
+        for, call this to check. If you find a matching tool, your NEXT
+        step is to call ``call_mcp_tool`` with that tool's name — do NOT
+        stop here or tell the user you cannot do it.
 
         :return: JSON list of available tools.
         """
@@ -230,12 +233,14 @@ class Tools:
         arguments: str = "{}",
     ) -> str | HTMLResponse:
         """
-        Use a tool from ``list_mcp_tools``. This is a normal tool call —
-        you provide the tool name and arguments, and it returns the
-        result (text or a visual display shown to the user).
+        Use a tool discovered via ``list_mcp_tools``. This is a normal
+        tool call — you provide the name and arguments, it returns a
+        result (text or a visual display shown directly to the user).
+        This works exactly like any other tool call you make.
 
-        IMPORTANT: When you know the tool name, call this immediately.
-        Do NOT say you cannot use it. Just call this function.
+        NEVER say "I cannot run/use/execute this tool". You CAN use it
+        by calling this function. When you know the tool name, call this
+        immediately.
 
         :param tool_name: Tool name from list_mcp_tools output.
         :param arguments: JSON string of tool arguments (default "{}").
