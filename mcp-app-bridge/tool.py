@@ -1,7 +1,7 @@
 """
 title: MCP App Bridge
 author: Classic298
-version: 0.3.0
+version: 0.4.0
 description: Proof of concept — wraps MCP server tools and renders MCP App UI resources (ui://) as Rich UI embeds using Open WebUI's existing embed system. Spec-compliant: honors server-declared CSP, dispatches ui/notifications/tool-result for AppBridge SDK compatibility. No middleware changes needed.
 """
 
@@ -32,20 +32,31 @@ def _to_dict(obj) -> dict:
     return {}
 
 
-def _extract_ui_resource_uri(tool) -> str | None:
-    """Extract ui:// resource URI from tool metadata, if present."""
+def _extract_ui_meta(tool) -> dict:
+    """Extract the _meta.ui dict from a tool definition."""
     meta_dict = _to_dict(getattr(tool, "meta", None))
     if not meta_dict:
-        return None
+        return {}
 
-    # Nested format: _meta.ui.resourceUri
+    # Nested format: _meta.ui
     ui_meta = meta_dict.get("ui", {})
     if isinstance(ui_meta, dict):
-        uri = ui_meta.get("resourceUri", "")
-        if isinstance(uri, str) and uri.startswith("ui://"):
-            return uri
+        return ui_meta
+
+    return {}
+
+
+def _extract_ui_resource_uri(tool) -> str | None:
+    """Extract ui:// resource URI from tool metadata, if present."""
+    ui_meta = _extract_ui_meta(tool)
+
+    # Nested format: _meta.ui.resourceUri
+    uri = ui_meta.get("resourceUri", "")
+    if isinstance(uri, str) and uri.startswith("ui://"):
+        return uri
 
     # Flat format: _meta["ui/resourceUri"]
+    meta_dict = _to_dict(getattr(tool, "meta", None)) or {}
     flat_uri = meta_dict.get("ui/resourceUri", "")
     if isinstance(flat_uri, str) and flat_uri.startswith("ui://"):
         return flat_uri
@@ -157,6 +168,11 @@ class Tools:
     then the model can discover and call MCP tools. If a tool declares
     a ``ui://`` resource, the HTML is fetched and rendered inline.
 
+    When the user asks about a capability you don't natively have
+    (e.g. viewing files, running diagnostics, visualizations), use
+    ``list_mcp_tools`` to check whether the MCP server provides a
+    matching tool before telling the user you can't do it.
+
     Security: honors server-declared CSP (``_meta.ui.csp``) and
     permissions (``_meta.ui.permissions``) per the MCP Apps spec.
     """
@@ -183,6 +199,8 @@ class Tools:
         """
         List all tools available on the configured MCP server.
         Shows name, description, and whether each tool has a UI resource.
+        Call this first when the user references a capability you don't
+        have built-in — the MCP server may provide it as a tool.
 
         :return: JSON list of available tools with their metadata.
         """
@@ -237,9 +255,12 @@ class Tools:
             tools_result = await session.list_tools()
             ui_resource_uri = None
 
+            max_height = None
             for tool in tools_result.tools:
                 if tool.name == tool_name:
                     ui_resource_uri = _extract_ui_resource_uri(tool)
+                    ui_meta = _extract_ui_meta(tool)
+                    max_height = ui_meta.get("maxHeight")
                     break
 
             # --- Call the tool ---
@@ -318,10 +339,15 @@ class Tools:
                 "</script>\n"
             )
 
+            # Use maxHeight from tool metadata as a floor for apps that use
+            # height:100% / flex layouts (their scrollHeight is tiny without it).
+            max_h_js = f"var maxH={int(max_height)};" if max_height else "var maxH=0;"
             height_script = (
                 "<script>\n"
+                f"{max_h_js}\n"
                 "function reportHeight(){\n"
                 "  var h=document.documentElement.scrollHeight;\n"
+                "  if(maxH && h<maxH) h=maxH;\n"
                 "  window.parent.postMessage({type:'iframe:height',height:h},'*');\n"
                 "}\n"
                 "window.addEventListener('load',function(){reportHeight();setTimeout(reportHeight,200)});\n"
@@ -330,7 +356,15 @@ class Tools:
                 "</script>\n"
             )
 
-            injection = csp_tag + data_script + appbridge_shim + height_script
+            # If maxHeight is declared, give the document a min-height so that
+            # apps using height:100% / flex layouts expand properly.
+            min_height_style = ""
+            if max_height:
+                min_height_style = (
+                    f"<style>html,body{{min-height:{int(max_height)}px}}</style>\n"
+                )
+
+            injection = csp_tag + min_height_style + data_script + appbridge_shim + height_script
 
             if "<head>" in html_content:
                 html_content = html_content.replace("<head>", "<head>\n" + injection, 1)
