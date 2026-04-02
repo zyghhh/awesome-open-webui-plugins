@@ -48,11 +48,13 @@ THEME_CSS = """
   --ramp-red-fill:#FCEBEB;    --ramp-red-stroke:#A32D2D;    --ramp-red-th:#791F1F;    --ramp-red-ts:#A32D2D;
   /* --- Common aliases (catch hallucinated variable names) --- */
   /* Text */
+  --fg: var(--color-text-primary);
   --text: var(--color-text-primary);
   --foreground: var(--color-text-primary);
   --text-primary: var(--color-text-primary);
   --text-color: var(--color-text-primary);
   --color-text: var(--color-text-primary);
+  --color-foreground: var(--color-text-primary);
   --body-color: var(--color-text-primary);
   --muted: var(--color-text-secondary);
   --muted-foreground: var(--color-text-secondary);
@@ -364,8 +366,21 @@ document.addEventListener('toggle', function() {
   _rh_consecutive = 0;
   setTimeout(reportHeight, 50);
 }, true);
-// Reset loop detector on user interaction (clicks may change content height)
-document.addEventListener('click', function() { _rh_consecutive = 0; }, true);
+// Watch for DOM mutations (SPA page swaps via innerHTML, dynamic content).
+// ResizeObserver misses these when content changes inside overflow:auto containers.
+var _rh_mutRaf = 0;
+new MutationObserver(function() {
+  _rh_consecutive = 0;
+  cancelAnimationFrame(_rh_mutRaf);
+  _rh_mutRaf = requestAnimationFrame(reportHeight);
+}).observe(document.body, { childList: true, subtree: true });
+// Reset loop detector on click — covers custom expand/collapse (style.display
+// toggles, class changes) that MutationObserver childList doesn't catch.
+document.addEventListener('click', function() {
+  _rh_consecutive = 0;
+  cancelAnimationFrame(_rh_mutRaf);
+  _rh_mutRaf = requestAnimationFrame(reportHeight);
+}, true);
 
 // --- Post-render fixes (theme defaults, overlap prevention) ---
 window.addEventListener('load', function() {
