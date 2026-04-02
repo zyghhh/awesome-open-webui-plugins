@@ -688,10 +688,10 @@ class Tools:
         )
         result_context = (
             f'Visualization "{title}" is now rendered and visible to the user as an '
-            f"interactive embed. Do NOT echo back the HTML/SVG source code. Instead, "
+            f"interactive embed. DO NOT echo back the HTML/SVG source code. Instead, "
             f"briefly describe what the visualization shows in plain language. If the "
             f"visualization has interactive elements (clickable nodes, buttons, sliders), "
-            f"mention what the user can interact with."
+            f"mention what the user can interact with. DO NOT OUTPUT THE HTML/SVG source again!"
         )
         return response, result_context
 
