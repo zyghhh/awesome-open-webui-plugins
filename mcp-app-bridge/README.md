@@ -2,6 +2,7 @@
 
 Renders [MCP Apps](https://github.com/modelcontextprotocol/ext-apps) (SEP-1865) as Rich UI embeds in Open WebUI — using the existing embed system, no middleware changes needed.
 
+> [!TIP]
 > **🚀 [Jump to Setup Guide](#setup)** — get up and running in under 1 minute.
 
 > [!NOTE]
