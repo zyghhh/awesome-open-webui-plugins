@@ -1,5 +1,8 @@
 # 📊 Inline Visualizer
 
+> [!IMPORTANT]
+> **This is v1.** A newer version with **live streaming support** is available: [Inline Visualizer v2](../inline-visualizer-v2/)
+
 Renders interactive HTML/SVG visualizations inline in chat. Includes a full design system with theme-aware colors, SVG utility classes, and a communication bridge that lets visualizations send prompts back to the chat.
 
 > [!TIP]
