@@ -1308,13 +1308,28 @@ STREAMING_OBSERVER_SCRIPT = """
 
   function hideEl(el) {
     if (!el || el.nodeType !== 1) return;
-    if (el.getAttribute('data-iv-chat-hidden') !== '1') {
-      el.setAttribute('data-iv-chat-hidden', '1');
-    }
+    // Idempotent: skip if already hidden so we don't re-trigger
+    // MutationObserver and feed the tick → mutate → tick loop.
+    if (el.getAttribute('data-iv-chat-hidden') === '1') return;
+    el.setAttribute('data-iv-chat-hidden', '1');
     // setProperty(_, _, 'important') emits `display: none !important`
     // as an inline style — beats any stylesheet without specificity
     // fights, and survives DOM re-renders that keep the element alive.
     try { el.style.setProperty('display', 'none', 'important'); } catch(e) {}
+  }
+
+  function unhideEl(el) {
+    if (!el || el.nodeType !== 1) return;
+    if (el.getAttribute('data-iv-chat-hidden') !== '1') return;
+    el.removeAttribute('data-iv-chat-hidden');
+    try { el.style.removeProperty('display'); } catch(e) {}
+  }
+
+  function unwrapTextWrap(span) {
+    var p = span.parentNode;
+    if (!p) return;
+    while (span.firstChild) p.insertBefore(span.firstChild, span);
+    p.removeChild(span);
   }
 
   function wrapAndHideText(textNode) {
@@ -1397,11 +1412,13 @@ STREAMING_OBSERVER_SCRIPT = """
       );
     } catch(e) { return; }
 
+    // Pass 1: categorize every text node as hide (inside marker range)
+    // or not. We need both kinds — pass 2 uses the non-hide nodes to
+    // detect blocks that mix hide and non-hide content (e.g. post-viz
+    // prose sharing a <p> with @@@VIZ-END).
     var inside = false;
+    var items = [];
     var tn;
-    var toHideEls = [];
-    var toWrapText = [];
-
     while ((tn = walker.nextNode())) {
       // Skip text nodes that live inside our embed container / iframe —
       // those are our own rendered UI, never chat content to hide.
@@ -1409,27 +1426,10 @@ STREAMING_OBSERVER_SCRIPT = """
       if (myEmbedContainer && myEmbedContainer.contains(tn)) continue;
 
       var tv = tn.nodeValue || '';
-      var startIdx = tv.indexOf(START_MARK);
-      var endIdx = tv.indexOf(END_MARK);
-      var hadStartLocal = startIdx !== -1;
-      var hadEndLocal = endIdx !== -1;
+      var hadStartLocal = tv.indexOf(START_MARK) !== -1;
+      var hadEndLocal = tv.indexOf(END_MARK) !== -1;
 
-      var hideThis = inside || hadStartLocal || hadEndLocal;
-
-      if (hideThis) {
-        var block = nearestBlockAncestor(tn.parentNode, msg);
-        if (block && block !== msg) {
-          // Make sure we're not about to hide the message itself, or
-          // any ancestor of our iframe.
-          if (!block.contains(myFrame)) {
-            toHideEls.push(block);
-          } else {
-            toWrapText.push(tn);
-          }
-        } else {
-          toWrapText.push(tn);
-        }
-      }
+      items.push({ tn: tn, hide: inside || hadStartLocal || hadEndLocal });
 
       // State flip AFTER this node is processed (so the node carrying
       // END_MARK is itself hidden).
@@ -1444,9 +1444,109 @@ STREAMING_OBSERVER_SCRIPT = """
       }
     }
 
-    // Apply hides (deduped via the attribute check inside hideEl).
-    for (var i = 0; i < toHideEls.length; i++) hideEl(toHideEls[i]);
-    for (var j = 0; j < toWrapText.length; j++) wrapAndHideText(toWrapText[j]);
+    // Pass 2: mark every element ancestor of a non-hide text node.
+    // A block is only safe to hide wholesale if nothing visible lives
+    // inside it.
+    var hasNonHide = new WeakSet();
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].hide) continue;
+      var cur = items[i].tn.parentNode;
+      while (cur && cur !== msg) {
+        if (cur.nodeType === 1) hasNonHide.add(cur);
+        cur = cur.parentNode;
+      }
+    }
+
+    // Pass 3: build the desired hide / wrap sets. Hide the nearest clean
+    // block ancestor; otherwise wrap the specific text node. Wrapping
+    // leaves an empty span where the text was but preserves sibling
+    // prose that shares the same block.
+    var desiredHideEls = new Set();
+    var desiredWrapTexts = new Set();
+    for (var k = 0; k < items.length; k++) {
+      if (!items[k].hide) continue;
+      var tn2 = items[k].tn;
+      var block = nearestBlockAncestor(tn2.parentNode, msg);
+      if (block && block !== msg &&
+          !block.contains(myFrame) &&
+          !hasNonHide.has(block)) {
+        desiredHideEls.add(block);
+      } else {
+        desiredWrapTexts.add(tn2);
+      }
+    }
+
+    // Pass 4: extend the hide set to neighboring empty decorative
+    // siblings. The markdown renderer emits empty <div class="my-2">
+    // spacers between paragraphs — each contributes ~1rem of margin,
+    // which adds up to a visible gap once both surrounding blocks are
+    // hidden but the spacers aren't.
+    function isEmptyDecorative(el) {
+      if (!el || el.nodeType !== 1) return false;
+      if (el === myFrame) return false;
+      if (el.contains && el.contains(myFrame)) return false;
+      if (embedsRoot && (el === embedsRoot || el.contains(embedsRoot))) return false;
+      // Already hidden by us → don't re-add (cheap dedupe).
+      if (desiredHideEls.has(el)) return false;
+      // Wrap spans live inside flow but take no space themselves.
+      if (el.getAttribute && el.getAttribute('data-iv-chat-wrap') === '1') return false;
+      // Has visible text → not decorative.
+      var t = el.textContent || '';
+      if (t.replace(/\s+/g, '').length > 0) return false;
+      // Has media / interactive / iframe descendants → keep.
+      try {
+        if (el.querySelector('iframe, img, svg, canvas, video, audio, button, input, [id*="-embeds-"]')) {
+          return false;
+        }
+      } catch(e) {}
+      return true;
+    }
+    var seedHides = [];
+    desiredHideEls.forEach(function(el) { seedHides.push(el); });
+    for (var s = 0; s < seedHides.length; s++) {
+      var seed = seedHides[s];
+      var n = seed.nextElementSibling;
+      while (n && isEmptyDecorative(n)) {
+        desiredHideEls.add(n);
+        n = n.nextElementSibling;
+      }
+      var pv = seed.previousElementSibling;
+      while (pv && isEmptyDecorative(pv)) {
+        desiredHideEls.add(pv);
+        pv = pv.previousElementSibling;
+      }
+    }
+
+    // Cleanup: drop stale wraps (Svelte's streaming patcher sometimes
+    // adopts follow-up nodes as children of our wrap span — unwrap
+    // those so the post-viz prose doesn't ride along hidden) and stale
+    // block hides (markers moved, block is now plain prose). Each
+    // mutation here only happens when current state diverges from
+    // desired — keeps the function idempotent in steady state, which
+    // prevents tick → mutate → tick infinite loops via MutationObserver.
+    try {
+      var wraps = msg.querySelectorAll('[data-iv-chat-wrap="1"]');
+      for (var w = 0; w < wraps.length; w++) {
+        var ws = wraps[w];
+        var only = ws.firstChild;
+        var clean = only && only.nodeType === 3 && ws.childNodes.length === 1;
+        if (!clean || !desiredWrapTexts.has(only)) {
+          unwrapTextWrap(ws);
+        }
+      }
+      var hiddens = msg.querySelectorAll('[data-iv-chat-hidden="1"]');
+      for (var h = 0; h < hiddens.length; h++) {
+        var he = hiddens[h];
+        // Wrap spans inherit their hidden state from the wrap — handled
+        // above by unwrapTextWrap which removes the element entirely.
+        if (he.getAttribute('data-iv-chat-wrap') === '1') continue;
+        if (!desiredHideEls.has(he)) unhideEl(he);
+      }
+    } catch(e) {}
+
+    // Apply (idempotent helpers — skip if already in desired state).
+    desiredHideEls.forEach(function(el) { hideEl(el); });
+    desiredWrapTexts.forEach(function(tn) { wrapAndHideText(tn); });
   }
 
   // Safe-cut partial-HTML parser
