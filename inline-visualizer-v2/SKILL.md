@@ -14,7 +14,7 @@ You call the tool with **only a title**, and then emit the HTML/SVG content wrap
 1. Call `render_visualization(title="…")`
 2. In your text response, write explanatory prose
 3. Open with `@@@VIZ-START` on its own line
-4. Emit the HTML/SVG **content fragment only** — **NEVER** wrap in `<!DOCTYPE>`, `<html>`, `<head>`, or `<body>` tags (the iframe already has these; duplicating them corrupts the DOM)
+4. Emit the HTML/SVG **content fragment** (no `<!DOCTYPE>`, `<html>`, `<head>`, `<body>`)
 5. Close with `@@@VIZ-END` on its own line
 6. Continue with any follow-up prose
 
@@ -49,6 +49,56 @@ As you can see, each query token attends to all key tokens simultaneously.
 
 - Theme CSS, SVG classes, color ramps, height reporting, `sendPrompt()` bridge, and `openLink()` bridge
 - Consider making diagrams **conversational** with `sendPrompt()` — see the [sendPrompt bridge](#sendprompt-bridge--conversational-diagrams) section for patterns and examples
+
+### Accent color palette
+
+The default accent is **purple**. Switch to one of the other ramps via the
+`data-accent` attribute. The chosen color drives `--accent` and
+`--accent-foreground`, which in turn power focus rings, checkbox/radio
+fills, and any `var(--accent)` reference you write yourself. The same
+nine names match the chart color ramps, so a teal-accented form sits
+naturally next to a teal-accented chart.
+
+Available values: `purple` (default) · `teal` · `coral` · `pink` ·
+`gray` · `blue` · `green` · `amber` · `red`
+
+**Global** — wrap the entire viz content in a single root `<div>` carrying
+`data-accent`. Do NOT emit `<html>`, `<head>`, or `<body>` tags — the iframe
+already provides those; writing them here causes the chat to render the
+literal source as escaped text.
+
+```html
+<div data-accent="teal">
+  <style>/* viz CSS */</style>
+  …all focus rings, checkboxes, and var(--accent) consumers go teal…
+</div>
+```
+
+**Section** — set on any inner container to recolor its subtree only:
+
+```html
+<div data-accent="teal">
+  <button>Save</button>            <!-- teal focus ring -->
+  <input type="checkbox" checked>  <!-- teal accent -->
+</div>
+<button>Cancel</button>            <!-- still default purple -->
+```
+
+**Single element** — set directly on an element to recolor just it:
+
+```html
+<button data-accent="green">Approve</button>
+<button data-accent="red">Reject</button>
+```
+
+Both light and dark themes are handled — accent values track per-theme
+ramp stops automatically, and foreground text color flips for legibility
+in dark mode. No manual override needed.
+
+Pick an accent that matches the topic: `green` for finance/positive,
+`red` for warnings/critical actions, `blue` for informational dashboards,
+`amber` for attention/caution, etc. Default to `purple` for neutral or
+multi-purpose visualizations.
 
 ## Output rules
 
@@ -549,4 +599,3 @@ You do NOT need `DOMContentLoaded` or `window.onload` wrappers — by the time y
 8. **Missing arrow marker in defs** — always include it
 9. **Hardcoded colors** — always use CSS variables or ramp classes
 10. **Chart.js canvas collapsed to 0 height** — wrap every canvas in `<div style="position: relative; height: Xpx;">` and set `maintainAspectRatio: false`
-11. **Document wrapper tags** — never emit `<!DOCTYPE>`, `<html>`, `<head>`, or `<body>`. The iframe shell already provides these. Including them mangles the DOM and breaks script execution
