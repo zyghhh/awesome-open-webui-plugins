@@ -1,7 +1,8 @@
 """
 title: Inline Visualizer v2
 author: Classic298
-version: 2.0.0
+version: 2.1.0
+required_open_webui_version: 0.9.2
 description: Renders interactive HTML/SVG visualizations inline in chat. Requires "iframe Sandbox Allow Same Origin" to be enabled in Open WebUI Settings -> Interface. For design instructions, the model should call view_skill("visualize").
 """
 
@@ -12,7 +13,7 @@ from typing import Literal
 # version can be verified at runtime (search DevTools for
 # `data-iv-build` on <html>).  Bump on every protocol-level change
 # so stale cached iframes can be spotted immediately.
-_IV_BUILD = "2.0.0"
+_IV_BUILD = "2.1.0"
 
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
@@ -97,6 +98,8 @@ THEME_CSS = """
   --primary-foreground: #ffffff;
   --accent: #6c2eb9;
   --accent-foreground: #ffffff;
+  /* Themed select chevron (light) — used by the pre-styled <select> */
+  --select-arrow: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M3 4.5l3 3 3-3' fill='none' stroke='%236B7280' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
 }
 :root[data-theme="dark"] {
   --color-text-primary: #E5E7EB;
@@ -160,6 +163,31 @@ THEME_CSS = """
   --primary-foreground: #1A1A1A;
   --accent: #a78bfa;
   --accent-foreground: #ffffff;
+  --select-arrow: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M3 4.5l3 3 3-3' fill='none' stroke='%239CA3AF' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+}
+
+/* --- Named accent palette ---
+ * Apply data-accent="<name>" on <html> for global, on any element
+ * for local override. The variants reuse the existing color-ramp
+ * stroke colors so charts and forms share visual vocabulary
+ * (teal here = teal in a chart). Each variant works in both
+ * light and dark themes — --accent picks up the ramp's per-theme
+ * stroke automatically; --accent-foreground flips dark in dark
+ * mode so text stays legible on pastel accents.
+ */
+[data-accent="purple"] { --accent: var(--ramp-purple-stroke); --accent-foreground: #ffffff; }
+[data-accent="teal"]   { --accent: var(--ramp-teal-stroke);   --accent-foreground: #ffffff; }
+[data-accent="coral"]  { --accent: var(--ramp-coral-stroke);  --accent-foreground: #ffffff; }
+[data-accent="pink"]   { --accent: var(--ramp-pink-stroke);   --accent-foreground: #ffffff; }
+[data-accent="gray"]   { --accent: var(--ramp-gray-stroke);   --accent-foreground: #ffffff; }
+[data-accent="blue"]   { --accent: var(--ramp-blue-stroke);   --accent-foreground: #ffffff; }
+[data-accent="green"]  { --accent: var(--ramp-green-stroke);  --accent-foreground: #ffffff; }
+[data-accent="amber"]  { --accent: var(--ramp-amber-stroke);  --accent-foreground: #ffffff; }
+[data-accent="red"]    { --accent: var(--ramp-red-stroke);    --accent-foreground: #ffffff; }
+
+[data-theme="dark"] [data-accent],
+[data-theme="dark"][data-accent] {
+  --accent-foreground: #1A1A1A;
 }
 """
 
@@ -215,30 +243,344 @@ h1 { font-size: 22px; font-weight: 500; color: var(--color-text-primary); margin
 h2 { font-size: 18px; font-weight: 500; color: var(--color-text-primary); margin-bottom: 8px; }
 h3 { font-size: 16px; font-weight: 500; color: var(--color-text-primary); margin-bottom: 6px; }
 p  { font-size: 14px; color: var(--color-text-secondary); margin-bottom: 8px; }
-button {
+/* --- Pre-styled form elements ---
+ * Each rule is gated with :not([class]):not([style]) so the model
+ * opts in by emitting bare HTML. Adding either attribute is treated
+ * as opting out — the default suppresses and the model styles from
+ * scratch. Keeps token cost low for vanilla cases without locking
+ * the design space.
+ */
+button:not([class]):not([style]) {
   background: transparent; border: 0.5px solid var(--color-border-secondary);
   border-radius: var(--radius-md); padding: 6px 14px; font-size: 13px;
   color: var(--color-text-primary); cursor: pointer; font-family: var(--font-sans);
 }
-button:hover { background: var(--color-bg-secondary); }
-button.active { background: var(--color-bg-secondary); border-color: var(--color-border-primary); }
-input[type="range"] {
-  -webkit-appearance: none; width: 100%; height: 4px;
-  background: var(--color-border-tertiary); border-radius: 2px; outline: none;
-}
-input[type="range"]::-webkit-slider-thumb {
-  -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%;
-  background: var(--color-bg-primary); border: 0.5px solid var(--color-border-secondary); cursor: pointer;
-}
-select {
-  background: var(--color-bg-secondary); border: 0.5px solid var(--color-border-tertiary);
+button:not([class]):not([style]):hover { background: var(--color-bg-secondary); }
+
+input[type="text"]:not([class]):not([style]),
+input[type="number"]:not([class]):not([style]),
+input[type="email"]:not([class]):not([style]),
+input[type="search"]:not([class]):not([style]),
+input[type="password"]:not([class]):not([style]),
+input[type="tel"]:not([class]):not([style]),
+input[type="url"]:not([class]):not([style]),
+input[type="date"]:not([class]):not([style]),
+input[type="time"]:not([class]):not([style]),
+input[type="datetime-local"]:not([class]):not([style]) {
+  background: var(--color-bg-primary);
+  border: 0.5px solid var(--color-border-tertiary);
   border-radius: var(--radius-md); padding: 6px 10px; font-size: 13px;
   color: var(--color-text-primary); font-family: var(--font-sans);
+  outline: none; transition: border-color 0.15s ease;
 }
+input[type="text"]:not([class]):not([style]):focus,
+input[type="number"]:not([class]):not([style]):focus,
+input[type="email"]:not([class]):not([style]):focus,
+input[type="search"]:not([class]):not([style]):focus,
+input[type="password"]:not([class]):not([style]):focus,
+input[type="tel"]:not([class]):not([style]):focus,
+input[type="url"]:not([class]):not([style]):focus,
+input[type="date"]:not([class]):not([style]):focus,
+input[type="time"]:not([class]):not([style]):focus,
+input[type="datetime-local"]:not([class]):not([style]):focus {
+  border-color: var(--color-border-primary);
+}
+
+/* Drop the type=number spinner — clashes with the field's borders. */
+input[type="number"]:not([class]):not([style]) {
+  -moz-appearance: textfield; appearance: textfield;
+}
+input[type="number"]:not([class]):not([style])::-webkit-outer-spin-button,
+input[type="number"]:not([class]):not([style])::-webkit-inner-spin-button {
+  -webkit-appearance: none; margin: 0;
+}
+
+textarea:not([class]) {
+  background: var(--color-bg-primary);
+  border: 0.5px solid var(--color-border-tertiary);
+  border-radius: var(--radius-md); padding: 8px 10px; font-size: 13px;
+  color: var(--color-text-primary); font-family: var(--font-sans);
+  outline: none; resize: vertical; min-height: 60px;
+  transition: border-color 0.15s ease;
+}
+textarea:not([class]):focus { border-color: var(--color-border-primary); }
+
+/* accent-color always applies, regardless of class/style — it's a
+ * tint property the model is highly unlikely to set themselves, and
+ * letting it ride keeps palette switches consistent even when the
+ * model adds inline width/max-width styling to the slider. */
+input[type="range"], input[type="checkbox"], input[type="radio"] {
+  accent-color: var(--accent);
+}
+input[type="range"]:not([class]):not([style]) { width: 100%; }
+
+input[type="checkbox"]:not([class]):not([style]),
+input[type="radio"]:not([class]):not([style]) {
+  /* accent-color comes from the always-on rule above. */
+  cursor: pointer;
+}
+
+select:not([class]):not([style]) {
+  appearance: none; -webkit-appearance: none; -moz-appearance: none;
+  background-color: var(--color-bg-secondary);
+  background-image: var(--select-arrow);
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  border: 0.5px solid var(--color-border-tertiary);
+  border-radius: var(--radius-md); padding: 6px 28px 6px 10px;
+  font-size: 13px; color: var(--color-text-primary); font-family: var(--font-sans);
+  outline: none; cursor: pointer;
+}
+select:not([class]):not([style]):focus { border-color: var(--color-border-primary); }
+
+label:not([class]):not([style]) {
+  font-size: 13px; color: var(--color-text-primary); cursor: pointer;
+}
+fieldset:not([class]):not([style]) {
+  border: 0.5px solid var(--color-border-tertiary);
+  border-radius: var(--radius-md); padding: 12px;
+}
+legend:not([class]):not([style]) {
+  font-size: 12px; color: var(--color-text-secondary); padding: 0 6px;
+}
+
+/* Validation error border — standard a11y attribute, no class needed. */
+input[aria-invalid="true"]:not([class]):not([style]),
+textarea[aria-invalid="true"]:not([class]),
+select[aria-invalid="true"]:not([class]):not([style]) {
+  border-color: var(--color-text-danger);
+}
+
+/* Keyboard-only focus rings (accent outline). Mouse focus stays subtle. */
+button:not([class]):not([style]):focus-visible,
+input:not([class]):not([style]):focus-visible,
+textarea:not([class]):focus-visible,
+select:not([class]):not([style]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 code {
   font-family: var(--font-mono); font-size: 13px; background: var(--color-bg-tertiary);
   padding: 2px 6px; border-radius: 4px;
 }
+
+/* <kbd> — keyboard-key pill (cmd/ctrl/k style). */
+kbd:not([class]):not([style]) {
+  font-family: var(--font-mono); font-size: 12px;
+  background: var(--color-bg-secondary);
+  border: 0.5px solid var(--color-border-tertiary);
+  border-radius: 4px; padding: 1px 6px;
+  color: var(--color-text-primary);
+}
+
+/* <hr> — flat divider matching the rest of the borders. */
+hr:not([class]):not([style]) {
+  border: none;
+  border-top: 0.5px solid var(--color-border-tertiary);
+  margin: 1.5rem 0;
+}
+
+/* <details> / <summary> — themed disclosure with a bigger chevron.
+ * Container is an invisible rounded "wrapper" — the visible card-
+ * shape is the summary header itself. This way if a model adds its
+ * own summary background/border, the result is still single-card,
+ * not nested. Chevron is sized to be clearly visible. */
+details:not([class]):not([style]) {
+  margin: 12px 0;
+  border: 0.5px solid var(--color-border-tertiary);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+details:not([class]):not([style]) > summary {
+  cursor: pointer; list-style: none; user-select: none;
+  font-weight: 500; color: var(--color-text-primary);
+  background: var(--color-bg-secondary);
+  padding: 10px 14px 10px 34px;
+  position: relative;
+  transition: background-color 0.15s ease;
+}
+details:not([class]):not([style]) > summary:hover {
+  background: var(--color-bg-tertiary);
+}
+details:not([class]):not([style]) > summary::-webkit-details-marker { display: none; }
+details:not([class]):not([style]) > summary::marker { content: ''; }
+details:not([class]):not([style]) > summary::before {
+  content: '\\25B8'; /* ▸ */
+  position: absolute; left: 12px; top: 50%;
+  transform: translateY(-50%);
+  transition: transform 0.15s ease;
+  color: var(--color-text-secondary);
+  font-size: 18px;
+  line-height: 1;
+}
+details[open]:not([class]):not([style]) > summary::before {
+  transform: translateY(-50%) rotate(90deg);
+}
+details[open]:not([class]):not([style]) > summary {
+  border-bottom: 0.5px solid var(--color-border-tertiary);
+}
+/* Margin (not padding) so children with their own bg inset properly. */
+details:not([class]):not([style]) > *:not(summary) {
+  margin: 12px 14px;
+}
+
+blockquote:not([class]):not([style]) {
+  border-left: 4px solid var(--accent);
+  background: var(--color-bg-secondary);
+  padding: 12px 18px;
+  margin: 16px 0;
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-md);
+}
+blockquote:not([class]):not([style]) > :last-child { margin-bottom: 0; }
+blockquote:not([class]):not([style]) > :first-child { margin-top: 0; }
+
+/* <table> — flat data table, theme-matched borders, header pill,
+ * row hover, last-row borderless, no zebra (kept calm). For numeric
+ * columns, add align="right" or class="num" to <th>/<td>. */
+table:not([class]):not([style]) {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+  font-size: 13px;
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+}
+table:not([class]):not([style]) caption {
+  text-align: left;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  padding: 0 0 8px;
+  caption-side: top;
+}
+table:not([class]):not([style]) th {
+  text-align: left;
+  padding: 8px 12px;
+  /* Reset all sides so a model's `border:` shorthand can't leak through. */
+  border: none;
+  border-bottom: 0.5px solid var(--color-border-secondary);
+  font-weight: 500;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--color-bg-secondary);
+  white-space: nowrap;
+}
+table:not([class]):not([style]) td {
+  padding: 10px 12px;
+  border: none;
+  border-bottom: 0.5px solid var(--color-border-tertiary);
+  vertical-align: top;
+}
+table:not([class]):not([style]) tr:last-child > td {
+  border-bottom: none;
+}
+table:not([class]):not([style]) tbody tr {
+  transition: background-color 0.1s ease;
+}
+table:not([class]):not([style]) tbody tr:hover {
+  background: var(--color-bg-secondary);
+}
+/* Numeric columns: opt-in via align="right" or class="num" on cells. */
+table:not([class]):not([style]) td[align="right"],
+table:not([class]):not([style]) th[align="right"],
+table:not([class]):not([style]) td.num,
+table:not([class]):not([style]) th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+mark:not([class]):not([style]) {
+  background: var(--ramp-amber-fill);
+  color: var(--ramp-amber-th);
+  padding: 0 4px;
+  border-radius: 3px;
+}
+
+/* <dl> three modes — default stacked, data-layout="grid", data-layout="inline".
+ * data-layout is the explicit opt-in, so [data-layout] rules skip the class/style gate. */
+dl:not([class]):not([style]) { margin: 12px 0; }
+dl:not([class]):not([style]) > dt {
+  font-weight: 500;
+  color: var(--color-text-primary);
+  font-size: 14px;
+  margin-top: 12px;
+}
+dl:not([class]):not([style]) > dt:first-child { margin-top: 0; }
+dl:not([class]):not([style]) > dd {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+/* `display: contents` on the optional wrapping div + dual selectors below
+ * tolerates both flat <dt><dd>… and <div><dt><dd></div>… markup. */
+dl[data-layout="grid"] {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 8px 16px;
+  align-items: baseline;
+  padding: 12px 16px;
+  border: 0.5px solid var(--color-border-tertiary);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+  margin: 12px 0;
+}
+dl[data-layout="grid"] > div { display: contents; }
+dl[data-layout="grid"] > dt,
+dl[data-layout="grid"] > div > dt {
+  font-weight: 400;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  margin: 0;
+}
+dl[data-layout="grid"] > dd,
+dl[data-layout="grid"] > div > dd {
+  margin: 0;
+  text-align: right;
+  color: var(--color-text-primary);
+  font-weight: 500;
+  font-size: 13px;
+}
+
+/* data-layout="inline" — pill row. Each <dt>/<dd> pair wrapped in <div>.
+ * Same opt-in-via-attribute logic as grid above — no :not() gate. */
+dl[data-layout="inline"] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0;
+}
+dl[data-layout="inline"] > div {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 4px 10px;
+  border: 0.5px solid var(--color-border-tertiary);
+  border-radius: 999px;
+  font-size: 12px;
+  background: var(--color-bg-secondary);
+}
+dl[data-layout="inline"] > div > dt {
+  margin: 0;
+  font-weight: 400;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+dl[data-layout="inline"] > div > dt::after {
+  content: ":";
+  margin-right: 2px;
+}
+dl[data-layout="inline"] > div > dd {
+  margin: 0;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  font-size: 12px;
+}
+
 #iv-dl-wrap{position:fixed;top:4px;right:4px;z-index:9999}
 #iv-dl-btn{width:26px;height:26px;padding:0;display:flex;align-items:center;justify-content:center;
   opacity:0.3;border-color:var(--color-border-tertiary);background:var(--color-bg-primary)}
@@ -266,6 +608,13 @@ code {
 # ---------------------------------------------------------------------------
 # Theme script runs in <head> before user content so CSS vars are resolved
 # when model scripts read them at parse time.
+#
+# !! SRCDOC SAFETY !!  Do NOT write the literal tokens <!-- , --> ,
+# <![CDATA[ , ]]> , <script> or </script> ANYWHERE in this body —
+# not even inside JS comments. The iframe srcdoc's HTML5 tokenizer
+# treats them as parser state changes regardless of JS context, and
+# silently breaks the IIFE (see _assert_srcdoc_safe near the bottom
+# of this file for the runtime guard).
 THEME_DETECTION_SCRIPT = """
 <script>
 (function() {
@@ -315,6 +664,9 @@ THEME_DETECTION_SCRIPT = """
 </script>
 """
 
+# !! SRCDOC SAFETY !!  Do NOT write the literal tokens <!-- , --> ,
+# <![CDATA[ , ]]> , <script> or </script> ANYWHERE in this body —
+# not even inside JS comments. See THEME_DETECTION_SCRIPT for full rationale.
 BODY_SCRIPTS = """
 <script>
 // --- Height reporting ---
@@ -356,9 +708,30 @@ function reportHeight() {
     el.style.setProperty('min-height', '0', 'important');
     el.style.setProperty('overflow', 'visible', 'important');
   });
+
+  // Collapse any descendant with viewport-unit dimensions — 100vh
+  // resolves to our own reported height, so leaving it intact
+  // creates a feedback loop where body grows each cycle.
+  var savedVh = [];
+  try {
+    var vhUsers = b.querySelectorAll(
+      '[style*="vh"], [style*="vw"], [style*="vmin"], [style*="vmax"]'
+    );
+    for (var k = 0; k < vhUsers.length; k++) {
+      var ve = vhUsers[k];
+      savedVh.push({ el: ve, css: ve.style.cssText });
+      ve.style.setProperty('min-height', '0', 'important');
+      ve.style.setProperty('max-height', 'none', 'important');
+      ve.style.setProperty('height', 'auto', 'important');
+    }
+  } catch(e) {}
+
   var h = b.scrollHeight + svgOverflow;
   b.style.cssText = savedBody;
   saved.forEach(function(s) { s.el.style.cssText = s.css; });
+  for (var v = 0; v < savedVh.length; v++) {
+    savedVh[v].el.style.cssText = savedVh[v].css;
+  }
 
   // Loop guard: 3+ consecutive small monotonic increases → stop.
   var delta = h - _rh_last;
@@ -977,7 +1350,25 @@ function _ivDownload() {
   // Strip download button + overflow:hidden for standalone use.
   var w = document.getElementById('iv-dl-wrap');
   if (w) w.remove();
-  var html = '<!DOCTYPE html>\\n' + document.documentElement.outerHTML;
+
+  // Serialize from a clone so we can relocate model-imported scripts
+  // without mutating the live iframe. enqueueScript appended each
+  // imported script tags to head for sequenced execution during streaming
+  // — but in a fresh standalone load, head scripts run BEFORE the body
+  // is parsed, so any getElementById('chart-canvas') etc. returns null.
+  // Move tagged scripts to the end of <body> so they execute after the
+  // canvases / DOM nodes they reference.
+  var docClone = document.documentElement.cloneNode(true);
+  var headClone = docClone.querySelector('head');
+  var bodyClone = docClone.querySelector('body');
+  if (headClone && bodyClone) {
+    var imported = headClone.querySelectorAll('script[data-iv-imported="1"]');
+    for (var ii = 0; ii < imported.length; ii++) {
+      bodyClone.appendChild(imported[ii]);
+    }
+  }
+  var html = '<!DOCTYPE html>\\n' + docClone.outerHTML;
+
   if (w) document.body.appendChild(w);
   html = html.replace('html, body { overflow: hidden; }', '');
 
@@ -1048,6 +1439,9 @@ function _ivDownload() {
 # a ``typeof playDoneSound === 'function'`` guard, so omission is safe.
 # ---------------------------------------------------------------------------
 
+# !! SRCDOC SAFETY !!  Do NOT write the literal tokens <!-- , --> ,
+# <![CDATA[ , ]]> , <script> or </script> ANYWHERE in this body —
+# not even inside JS comments. See THEME_DETECTION_SCRIPT for full rationale.
 CHIME_SCRIPT = """
 // --- Happy chime ---
 // C-major arpeggio (C5 → E5 → G5) on sine oscillators with exponential
@@ -1088,6 +1482,9 @@ function playDoneSound() {
 # not intercepted.
 # ---------------------------------------------------------------------------
 
+# !! SRCDOC SAFETY !!  Do NOT write the literal tokens <!-- , --> ,
+# <![CDATA[ , ]]> , <script> or </script> ANYWHERE in this body —
+# not even inside JS comments. See THEME_DETECTION_SCRIPT for full rationale.
 STRICT_SECURITY_SCRIPT = """
 <script>
 (function() {
@@ -1147,24 +1544,41 @@ STRICT_SECURITY_SCRIPT = """
 # Requires iframe Sandbox Allow Same Origin.
 # ---------------------------------------------------------------------------
 
+# !! SRCDOC SAFETY !!  Do NOT write the literal tokens <!-- , --> ,
+# <![CDATA[ , ]]> , <script> or </script> ANYWHERE in this body —
+# not even inside JS comments. See THEME_DETECTION_SCRIPT for full rationale.
+# This is the script that broke in 2.1.0–2.1.2 when a comment cleanup
+# accidentally introduced literal <!-- and <script> inside JS comments.
 STREAMING_OBSERVER_SCRIPT = """
 <script>
 (function() {
   'use strict';
-  // Delimiters — must match SKILL.md exactly. Chosen because:
-  //   * no collision with ``` / ~~~ / ::: / $$ / --- / *** / ===
-  //   * markdown tokenizes them as ordinary paragraph / html content,
-  //     never as a code block, so Open WebUI's CodeBlock.svelte +
-  //     CodeMirror never touch them → no virtualization edge cases.
+  // Markers must match SKILL.md. Chosen so markdown never treats them
+  // as a code fence (would put CodeMirror in the loop).
   var START_MARK = '@@@VIZ-START';
   var END_MARK = '@@@VIZ-END';
-  // Regex finds one block. Non-greedy, handles unclosed (streaming) by
-  // falling through to end-of-input. Match [1] is the inner SVG source.
-  // `+?` (not `*?`) forces at least 1 char of body — otherwise, the
-  // instant the model emits just `@@@VIZ-START` (no content yet), the
-  // `$` alternation matches an empty capture, readSource returns "",
-  // the 800 ms idle timer fires, finalize("") runs, and the reconciler
-  // wipes the render area → thin-strip regression.
+
+  // Stash the original text when we blank a node in place — wrapping
+  // breaks Svelte's tracked refs, but blanked nodes still need to
+  // surface the marker substring to the state machine.
+  var _ivOriginalText = (typeof WeakMap !== 'undefined') ? new WeakMap() : null;
+  function getEffectiveText(tn) {
+    if (!tn) return '';
+    var v = tn.nodeValue || '';
+    if (v === '' && _ivOriginalText && _ivOriginalText.has(tn)) {
+      return _ivOriginalText.get(tn) || '';
+    }
+    return v;
+  }
+  function blankPreserving(tn) {
+    var current = tn.nodeValue || '';
+    if (current === '') return;  // already blanked, idempotent no-op
+    if (_ivOriginalText) _ivOriginalText.set(tn, current);
+    try { tn.nodeValue = ''; } catch(e) {}
+  }
+  // `+?` (not `*?`): require ≥1 body char so a freshly emitted
+  // @@@VIZ-START with no content yet doesn't match an empty capture
+  // and trip finalize("") via the idle timer.
   var BLOCK_RE = /@@@VIZ-START\\n?([\\s\\S]+?)(?:\\n?@@@VIZ-END|$)/g;
 
   var renderArea = document.getElementById('iv-render');
@@ -1212,7 +1626,14 @@ STREAMING_OBSERVER_SCRIPT = """
     try {
       var f = window.frameElement;
       if (!f) return null;
-      myMessage = f.closest && f.closest('[id^="message-"]');
+      // chat-assistant wrapper holds both streaming-time buffer and
+      // settled content; response-content-container only populates on
+      // rehydrate. Toolbar / suggestions row are siblings, not
+      // descendants, so we won't scoop them up.
+      myMessage = (f.closest && f.closest('.chat-assistant'))
+        || (f.closest && f.closest('#response-content-container'))
+        || (f.closest && f.closest('[id^="message-"]'))
+        || null;
       return myMessage;
     } catch(e) { return null; }
   }
@@ -1240,13 +1661,17 @@ STREAMING_OBSERVER_SCRIPT = """
     return null;
   }
 
-  // Concatenate the searchable text of `msg`, SKIPPING any text that
-  // lives inside a <details> subtree (Open WebUI renders tool-call
-  // results in collapsed <details>, and OUR own result_context
-  // includes a literal @@@VIZ-START / @@@VIZ-END example that would
-  // otherwise be matched first by the regex and rendered instead of
-  // the model's real content).
-  function getSearchableText(msg) {
+  // Concatenate searchable text, skipping reasoning / tool-result
+  // subtrees so our own result_context example markers (and any
+  // @@@VIZ markers the model wrote in chain-of-thought) don't trip
+  // the state machine.
+  // skipReasoning=true (strict): rejects reasoning subtrees too —
+  // this is the preferred pass, since it ignores planning markers
+  // a model may have written in chain-of-thought.
+  // skipReasoning=false (lax): scans reasoning. Used as fallback for
+  // providers that wrap the actual visible response inside
+  // <details type="reasoning"> (Bedrock-hosted Haiku 4.5).
+  function getSearchableText(msg, skipReasoning) {
     var out = '';
     try {
       var walker = parent.document.createTreeWalker(
@@ -1254,18 +1679,25 @@ STREAMING_OBSERVER_SCRIPT = """
           acceptNode: function(n) {
             var p = n.parentNode;
             while (p && p !== msg) {
-              if (p.nodeType === 1 && p.tagName === 'DETAILS') {
-                // Only skip tool-result / reasoning / code_execution
-                // details — those carry our own result_context example
-                // markers. Other <details> (including the bare
-                // __DETAIL_N__ placeholder shims Open WebUI emits
-                // during streaming before it substitutes real tool
-                // markup) DO carry the model's actual response and
-                // must remain visible to the scanner.
-                var t = p.getAttribute && p.getAttribute('type');
-                if (t === 'tool_calls' || t === 'reasoning' ||
-                    t === 'code_execution' || t === 'code_interpreter') {
-                  return NodeFilter.FILTER_REJECT;
+              if (p.nodeType === 1) {
+                if (p.tagName === 'DETAILS') {
+                  var t = p.getAttribute && p.getAttribute('type');
+                  if (t === 'tool_calls' ||
+                      t === 'code_execution' || t === 'code_interpreter') {
+                    return NodeFilter.FILTER_REJECT;
+                  }
+                  if (skipReasoning && t === 'reasoning') {
+                    return NodeFilter.FILTER_REJECT;
+                  }
+                }
+                var pid = p.id || '';
+                if (pid && pid.indexOf('-detail-group') !== -1) {
+                  if (pid.indexOf('tool') !== -1 || pid.indexOf('code') !== -1) {
+                    return NodeFilter.FILTER_REJECT;
+                  }
+                  if (skipReasoning) {
+                    return NodeFilter.FILTER_REJECT;
+                  }
                 }
               }
               p = p.parentNode;
@@ -1275,45 +1707,53 @@ STREAMING_OBSERVER_SCRIPT = """
         }
       );
       var t;
-      while ((t = walker.nextNode())) out += t.nodeValue || '';
+      while ((t = walker.nextNode())) out += getEffectiveText(t);
     } catch(e) { return msg.textContent || ''; }
     return out;
   }
 
-  // Read the full assistant message text and return the myIndex-th VIZ
-  // block's inner content (or null if not yet present).
-  function readSource() {
-    var msg = findMyMessage();
-    if (!msg) return null;
-    var idx = determineIndex();
-    if (idx === null) idx = 0;
-    var text = getSearchableText(msg);
+  // Returns the regex match object for the idx-th block in `text`, or null.
+  function _ivMatchBlock(text, idx) {
     BLOCK_RE.lastIndex = 0;
     var m, n = 0;
     while ((m = BLOCK_RE.exec(text)) !== null) {
-      if (n === idx) return m[1];
+      if (n === idx) return m;
       n++;
-      // Guard against zero-length match infinite loop
       if (m.index === BLOCK_RE.lastIndex) BLOCK_RE.lastIndex++;
     }
     return null;
   }
 
-  // Hide markers + between-marker content with inline
-  // `display:none !important` (beats every stylesheet, survives Svelte
-  // updates). Bare text nodes that marked emits for inline-html get
-  // wrapped in a hidden <span data-iv-chat-wrap>. Single-pass walker
-  // with a small state machine (OUTSIDE → START → INSIDE → END →
-  // OUTSIDE). Runs every tick, idempotent.
+  // Strict pass first (skips reasoning); fall back to lax (scans
+  // reasoning) only when strict yields no match. This way planning
+  // markers a model wrote in chain-of-thought never win over a real
+  // response — but providers that wrap the entire visible response
+  // inside <details type="reasoning"> (Bedrock-routed Haiku 4.5) still
+  // surface their content via the lax fallback.
+  function _ivResolveBlock(idx) {
+    var msg = findMyMessage();
+    if (!msg) return null;
+    var strict = _ivMatchBlock(getSearchableText(msg, true), idx);
+    if (strict !== null) return strict;
+    return _ivMatchBlock(getSearchableText(msg, false), idx);
+  }
+
+  function readSource() {
+    var idx = determineIndex();
+    if (idx === null) idx = 0;
+    var m = _ivResolveBlock(idx);
+    return m ? m[1] : null;
+  }
+
+  // Hide markers + between-marker content. Single-pass walker with
+  // an OUTSIDE/INSIDE state machine. Runs every tick, idempotent.
+  // Inline `display:none !important` survives Svelte re-renders.
 
   function hideEl(el) {
     if (!el || el.nodeType !== 1) return;
     if (el.getAttribute('data-iv-chat-hidden') !== '1') {
       el.setAttribute('data-iv-chat-hidden', '1');
     }
-    // setProperty(_, _, 'important') emits `display: none !important`
-    // as an inline style — beats any stylesheet without specificity
-    // fights, and survives DOM re-renders that keep the element alive.
     try { el.style.setProperty('display', 'none', 'important'); } catch(e) {}
   }
 
@@ -1350,13 +1790,14 @@ STREAMING_OBSERVER_SCRIPT = """
     return null;
   }
 
-  function hideMarkerRange() {
+  // allowWrap=false during streaming (wrapping a text node breaks
+  // Svelte's tracked refs and stalls post-VIZ chunks), true on finalize.
+  function hideMarkerRange(allowWrap) {
     var msg = findMyMessage();
     if (!msg) return;
     var myFrame = window.frameElement;
 
-    // Find my own embed container so we NEVER hide it — our iframe
-    // lives inside it. Everything else in the message body is fair game.
+    // Never hide our own iframe's container.
     var myEmbedContainer = null;
     try { myEmbedContainer = myFrame && myFrame.closest('[id*="-embeds-"]'); }
     catch(e) {}
@@ -1364,10 +1805,8 @@ STREAMING_OBSERVER_SCRIPT = """
     try { embedsRoot = myFrame && myFrame.closest('[id$="-embeds-container"]'); }
     catch(e) {}
 
-    // Walk every text node in document order — but skip anything inside
-    // a <details> subtree (Open WebUI renders tool-call results there,
-    // and OUR result_context carries an example @@@VIZ-START/END pair
-    // that would flip the state machine and hide unrelated chat prose).
+    // Skip reasoning / tool-result subtrees (same rationale as
+    // getSearchableText).
     var walker;
     try {
       walker = parent.document.createTreeWalker(
@@ -1375,17 +1814,18 @@ STREAMING_OBSERVER_SCRIPT = """
           acceptNode: function(n) {
             var p = n.parentNode;
             while (p && p !== msg) {
-              if (p.nodeType === 1 && p.tagName === 'DETAILS') {
-                // Only skip tool-result / reasoning / code_execution
-                // details — those carry our own result_context example
-                // markers. Other <details> (including the bare
-                // __DETAIL_N__ placeholder shims Open WebUI emits
-                // during streaming before it substitutes real tool
-                // markup) DO carry the model's actual response and
-                // must remain visible to the scanner.
-                var t = p.getAttribute && p.getAttribute('type');
-                if (t === 'tool_calls' || t === 'reasoning' ||
-                    t === 'code_execution' || t === 'code_interpreter') {
+              if (p.nodeType === 1) {
+                if (p.tagName === 'DETAILS') {
+                  var t = p.getAttribute && p.getAttribute('type');
+                  if (t === 'tool_calls' ||
+                      t === 'code_execution' || t === 'code_interpreter') {
+                    return NodeFilter.FILTER_REJECT;
+                  }
+                }
+                var pid = p.id || '';
+                if (pid && pid.indexOf('-detail-group') !== -1 &&
+                    (pid.indexOf('tool') !== -1 ||
+                     pid.indexOf('code') !== -1)) {
                   return NodeFilter.FILTER_REJECT;
                 }
               }
@@ -1400,42 +1840,34 @@ STREAMING_OBSERVER_SCRIPT = """
     var inside = false;
     var tn;
     var toHideEls = [];
-    var toWrapText = [];
+    var toBlankText = [];
 
     while ((tn = walker.nextNode())) {
-      // Skip text nodes that live inside our embed container / iframe —
-      // those are our own rendered UI, never chat content to hide.
       if (embedsRoot && embedsRoot.contains(tn)) continue;
       if (myEmbedContainer && myEmbedContainer.contains(tn)) continue;
 
-      var tv = tn.nodeValue || '';
-      var startIdx = tv.indexOf(START_MARK);
-      var endIdx = tv.indexOf(END_MARK);
-      var hadStartLocal = startIdx !== -1;
-      var hadEndLocal = endIdx !== -1;
+      // getEffectiveText surfaces the original (pre-blank) text so
+      // blanked nodes still match.
+      var tv = getEffectiveText(tn);
+      var hadStartLocal = tv.indexOf(START_MARK) !== -1;
+      var hadEndLocal = tv.indexOf(END_MARK) !== -1;
 
       var hideThis = inside || hadStartLocal || hadEndLocal;
 
       if (hideThis) {
         var block = nearestBlockAncestor(tn.parentNode, msg);
-        if (block && block !== msg) {
-          // Make sure we're not about to hide the message itself, or
-          // any ancestor of our iframe.
-          if (!block.contains(myFrame)) {
-            toHideEls.push(block);
-          } else {
-            toWrapText.push(tn);
-          }
+        if (block && block !== msg && !block.contains(myFrame)) {
+          // Clean block ancestor — hide wholesale, no text touched.
+          toHideEls.push(block);
         } else {
-          toWrapText.push(tn);
+          // Block contains our iframe — can't hide the block. Blank
+          // in place: nodeValue = '' preserves Svelte's ref identity.
+          toBlankText.push(tn);
         }
       }
 
-      // State flip AFTER this node is processed (so the node carrying
-      // END_MARK is itself hidden).
+      // Flip state AFTER processing so the END-bearing node is hidden.
       if (hadStartLocal && hadEndLocal) {
-        // Both markers in same text — treat as self-contained block,
-        // remain OUTSIDE afterwards.
         inside = false;
       } else if (hadStartLocal) {
         inside = true;
@@ -1444,19 +1876,19 @@ STREAMING_OBSERVER_SCRIPT = """
       }
     }
 
-    // Apply hides (deduped via the attribute check inside hideEl).
     for (var i = 0; i < toHideEls.length; i++) hideEl(toHideEls[i]);
-    for (var j = 0; j < toWrapText.length; j++) wrapAndHideText(toWrapText[j]);
+    if (allowWrap) {
+      // Finalize: wrap for tighter visual collapse (safe — Svelte
+      // has stopped streaming chunks).
+      for (var j = 0; j < toBlankText.length; j++) wrapAndHideText(toBlankText[j]);
+    } else {
+      for (var b = 0; b < toBlankText.length; b++) blankPreserving(toBlankText[b]);
+    }
   }
 
-  // Safe-cut partial-HTML parser
-  //
-  // Returns the last index in `text` where the parser is in a safe
-  // state (TEXT, not mid-tag / mid-attribute / mid-script / mid-CDATA)
-  // so we can flush the prefix to innerHTML without breakage. Depth
-  // doesn't matter — the browser auto-closes open tags on innerHTML
-  // assignment, which is what lets a <svg> progressively render as
-  // children stream in.
+  // Returns the last index where the parser is in TEXT state (not
+  // mid-tag / mid-attr / mid-script / mid-CDATA). Browser auto-closes
+  // open tags on innerHTML assignment — depth doesn't matter.
   var VOID_TAGS = {area:1,base:1,br:1,col:1,embed:1,hr:1,img:1,input:1,
                    link:1,meta:1,param:1,source:1,track:1,wbr:1};
   var RAW_TAGS = {script:1, style:1};
@@ -1494,11 +1926,10 @@ STREAMING_OBSERVER_SCRIPT = """
 
       if (state === 'TEXT') {
         if (ch === 60 /* < */) {
-          // Built by concatenation so the HTML tokenizer never sees
-          // the raw comment / CDATA delimiters inside this very
-          // script — those tokens would put the outer parser into
-          // data-escape / double-escape mode and corrupt our
-          // enclosing element's boundary.
+          // The HTML-comment / CDATA opener tokens are built via
+          // string concatenation. Embedding the raw forms in source
+          // (even inside a JS comment) puts the enclosing srcdoc
+          // parser into script-data-escape mode and breaks the IIFE.
           var CMT_OPEN = '<' + '!--';
           var CMT_CLOSE = '--' + '>';
           var CDATA_OPEN = '<' + '![CDATA[';
@@ -1510,7 +1941,9 @@ STREAMING_OBSERVER_SCRIPT = """
             continue;
           }
           if (text.substr(i, 9) === CDATA_OPEN) {
-            var ke = text.indexOf(']]>', i + 9);
+            // CDATA close — literal would put srcdoc parser into
+            // script-data-escape mode; concatenate at runtime.
+            var ke = text.indexOf(']]' + '>', i + 9);
             if (ke === -1) break;
             i = ke + 3;
             safeCut = i;
@@ -1584,28 +2017,18 @@ STREAMING_OBSERVER_SCRIPT = """
     return safeCut;
   }
 
-  // Incremental DOM reconciler — avoids flicker.
-  //
-  // Safe-cut output is append-only (each flush is a prefix superset of
-  // the last), so we parse the new safe into a detached tree and walk
-  // both trees in parallel, APPENDING new nodes and UPDATING grown
-  // text. Existing element nodes stay put — no reflow, no animation
-  // re-trigger. Attributes are immutable between cuts (the parser
-  // can't cut mid-tag), so we never sync them on existing elements.
+  // Incremental DOM reconciler — append-only, so existing elements
+  // stay put (no reflow, no animation re-trigger). Attributes are
+  // immutable between cuts (parser can't cut mid-tag).
 
-  // Promise chain that serializes script execution across an entire
-  // visualization. Each enqueue returns a fresh link in the chain that
-  // resolves only after the previous script has fully executed (or, for
-  // external scripts, fully loaded). Inline scripts created via
-  // createElement run synchronously on insertion, so the only way to
-  // make them wait for a preceding external src-script is to defer
-  // the insertion itself via this chain.
+  // Serializes script execution across the visualization — external
+  // scripts load async while inline scripts run sync on insertion,
+  // so we chain the insertions to enforce source order.
   var _ivScriptChain = Promise.resolve();
   var _ivEnqueuedScripts = Object.create(null);
 
-  // FNV-1a over the script body — cheap content-hash used as a dedupe
-  // key so the SAME script body is never executed twice, no matter how
-  // many reconciler branches re-encountered the same incoming node.
+  // FNV-1a content hash, used to dedupe script bodies across
+  // reconciler branches that may re-encounter the same node.
   function _ivHashScript(s) {
     var h = 2166136261;
     for (var i = 0; i < s.length; i++) {
@@ -1619,12 +2042,9 @@ STREAMING_OBSERVER_SCRIPT = """
     var src = incoming.getAttribute && incoming.getAttribute('src');
     var code = incoming.textContent || '';
 
-    // Dedupe by (src|body hash). The reconciler can legitimately hit
-    // the same script twice across its branches (`!exist` + position
-    // mismatch + descend paths) when the streaming-era tree shape
-    // differs from the finalize-era one. Running the body twice
-    // redeclares `const` / rebinds classes / double-wires event
-    // listeners — always a bug, so collapse here.
+    // Dedupe by src or content hash — reconciler may hit the same
+    // script twice across streaming/finalize branches. Re-execution
+    // would redeclare consts and double-wire listeners.
     var key = src ? ('src:' + src) : ('code:' + code.length + ':' + _ivHashScript(code));
     if (_ivEnqueuedScripts[key]) return;
     _ivEnqueuedScripts[key] = true;
@@ -1633,30 +2053,43 @@ STREAMING_OBSERVER_SCRIPT = """
     for (var a = 0; a < incoming.attributes.length; a++) {
       attrs.push([incoming.attributes[a].name, incoming.attributes[a].value]);
     }
+    // Each link in the chain is wrapped + .catch'd so a single bad
+    // script (model wrote invalid JS, attribute name has weird chars,
+    // appendChild's synchronous parse throws, etc.) can't kill the
+    // chain and stall every script that follows.
     if (src) {
       _ivScriptChain = _ivScriptChain.then(function() {
         return new Promise(function(resolve) {
-          var el = document.createElement('script');
-          attrs.forEach(function(pair) { el.setAttribute(pair[0], pair[1]); });
-          el.onload = el.onerror = function() { resolve(); };
-          document.head.appendChild(el);
+          try {
+            var el = document.createElement('script');
+            attrs.forEach(function(pair) {
+              try { el.setAttribute(pair[0], pair[1]); } catch(_){}
+            });
+            // Tag for HTML export: _ivDownload moves these to end of body
+            // so they execute after the model's canvases / DOM nodes exist.
+            el.setAttribute('data-iv-imported', '1');
+            el.onload = el.onerror = function() { resolve(); };
+            document.head.appendChild(el);
+          } catch(e) { resolve(); }
         });
-      });
+      }).catch(function() {});
     } else {
       _ivScriptChain = _ivScriptChain.then(function() {
         try {
           var el = document.createElement('script');
-          attrs.forEach(function(pair) { el.setAttribute(pair[0], pair[1]); });
+          attrs.forEach(function(pair) {
+            try { el.setAttribute(pair[0], pair[1]); } catch(_){}
+          });
+          el.setAttribute('data-iv-imported', '1');
           el.textContent = code;
           document.head.appendChild(el);
-        } catch(e) { try { console.error(e); } catch(_){} }
-      });
+        } catch(e) {}
+      }).catch(function() {});
     }
   }
 
-  // importNode preserves SVG namespaces. Script elements are handled
-  // specially via enqueueScript so external + inline scripts execute
-  // in source order with proper load-waiting.
+  // importNode preserves SVG namespaces. Scripts go through
+  // enqueueScript for source-order execution.
   function importAndAppend(parent, incoming) {
     var nt = incoming.nodeType;
     if (nt === 3) {
@@ -1671,15 +2104,10 @@ STREAMING_OBSERVER_SCRIPT = """
     var tag = incoming.nodeName;
     var el;
     if (tag === 'SCRIPT' || tag === 'script') {
-      // Serialize script execution: external src-scripts load async,
-      // inline scripts run synchronously on insertion, so an inline
-      // consumer would fire before the preceding external bundle
-      // finished loading. The promise chain makes every script wait
-      // for all previously-queued ones first.
       enqueueScript(incoming);
       return;
     }
-    // Shallow import preserves HTML-vs-SVG namespace.
+    // Shallow import preserves HTML/SVG namespace.
     el = document.importNode(incoming, false);
     parent.appendChild(el);
     for (var i = 0; i < incoming.childNodes.length; i++) {
@@ -1690,6 +2118,12 @@ STREAMING_OBSERVER_SCRIPT = """
   function reconcile(existing, incoming) {
     var existCh = existing.childNodes;
     var incCh = incoming.childNodes;
+    // Source declares this element as a leaf (no children); any children
+    // in the live DOM came from user scripts that target this element by
+    // id (d3.select(...).append('svg'), new vis.Network(container, ...),
+    // ECharts/Plotly/Vega painting into their target div, etc.). Trimming
+    // them would erase the chart, so leave the leaf alone.
+    if (incCh.length === 0) return;
     var i;
     for (i = 0; i < incCh.length; i++) {
       var inc = incCh[i];
@@ -1698,7 +2132,7 @@ STREAMING_OBSERVER_SCRIPT = """
         importAndAppend(existing, inc);
         continue;
       }
-      // Position mismatch — rare with append-only streams, guard anyway.
+      // Position mismatch — rare with append-only, but guard.
       if (exist.nodeType !== inc.nodeType ||
           (exist.nodeType === 1 && exist.nodeName !== inc.nodeName)) {
         existing.removeChild(exist);
@@ -1710,36 +2144,66 @@ STREAMING_OBSERVER_SCRIPT = """
         continue;
       }
       if (exist.nodeType === 3) {
-        // Text node — cheap update if content grew/changed.
         if (exist.nodeValue !== inc.nodeValue) exist.nodeValue = inc.nodeValue;
         continue;
       }
       if (exist.nodeType === 1) reconcile(exist, inc);
     }
-    // Shouldn't happen with append-only, but trim if it does.
-    while (existing.childNodes.length > incCh.length) {
-      existing.removeChild(existing.lastChild);
-    }
+    // No outer trim — streaming source is append-only, so existing
+    // children beyond incCh.length are script-added (D3 SVG, vis-network
+    // canvas/SVG, ECharts canvas, etc.). Removing them erases the chart
+    // mid-render even when the script targeted a non-leaf container.
   }
 
-  // withScripts=true materializes inline script tags (finalize path).
-  // withScripts=false strips them during streaming to avoid repeat exec.
-  // Regexes built at runtime via string concatenation — writing them
-  // as literals would bake the raw open/close tokens into our own
-  // embedded script, which the outer HTML parser sees and flips into
-  // double-escape mode (corrupts our enclosing element boundary).
+  // withScripts=true materializes scripts (finalize path); false strips
+  // them during streaming. Regex source is concatenated so the raw
+  // open / close tokens never appear literally in this file.
   var _ivOpen = '<' + 'script';
   var _ivClose = '<' + '\\/script>';
   var _ivStripPaired = new RegExp(_ivOpen + '[\\\\s\\\\S]*?' + _ivClose, 'gi');
   var _ivStripOpen = new RegExp(_ivOpen + '[\\\\s\\\\S]*$', 'i');
-  // Strip document-level tags that models sometimes wrap VIZ content in.
-  // These are invalid inside a div's innerHTML and mangle the DOM tree.
+  // Strip doc-level tags that models sometimes wrap VIZ content in.
   var _ivStripDocTags = new RegExp('<' + '!DOCTYPE[^>]*>|<' + '/?(?:html|head|body)[^>]*>', 'gi');
+
+  // Open WebUI's chat sanitizer strips <style> but keeps the inner CSS
+  // as text. Re-inflate consecutive bare CSS rules so the iframe can
+  // apply them. Strict pattern + ≥2 adjacent rules guards against
+  // accidental matches on JSON / object literals.
+  var _ivCssRule = /[A-Za-z@.#:*\[\]>+\-,\s_~()='"&]+\{\s*(?:[A-Za-z-]+\s*:\s*[^;{}<>]+;\s*)+\}/g;
+  function reinflateBareCSS(text) {
+    if (/<style[\\s>]/i.test(text)) return text;
+    _ivCssRule.lastIndex = 0;
+    var matches = [], m;
+    while ((m = _ivCssRule.exec(text)) !== null) {
+      matches.push({ start: m.index, end: _ivCssRule.lastIndex });
+      if (m.index === _ivCssRule.lastIndex) _ivCssRule.lastIndex++;
+    }
+    if (matches.length < 2) return text;
+    // Group consecutive rules (separated by < 50 chars of whitespace)
+    var groups = [], cur = null;
+    for (var i = 0; i < matches.length; i++) {
+      if (cur && matches[i].start - cur.end < 50) cur.end = matches[i].end;
+      else { cur = { start: matches[i].start, end: matches[i].end, count: 1 }; groups.push(cur); }
+      if (cur.start !== matches[i].start) cur.count = (cur.count || 1) + 1;
+    }
+    // Process from last to first to preserve indices
+    for (var g = groups.length - 1; g >= 0; g--) {
+      var grp = groups[g];
+      var slice = text.substring(grp.start, grp.end);
+      // Require multiple rules in the group
+      var brace = slice.match(/\{/g);
+      if (!brace || brace.length < 2) continue;
+      text = text.substring(0, grp.start) + '<style>' + slice + '</style>' + text.substring(grp.end);
+    }
+    return text;
+  }
+
   function renderSafeInto(text, withScripts) {
     var html = withScripts
       ? text
       : text.replace(_ivStripPaired, '').replace(_ivStripOpen, '');
     html = html.replace(_ivStripDocTags, '');
+    html = reinflateBareCSS(html);
     var temp = document.createElement('div');
     try {
       temp.innerHTML = html;
@@ -1782,12 +2246,57 @@ STREAMING_OBSERVER_SCRIPT = """
   }
 
   // ---- Finalize: run scripts, final height nudge ----------------------
+
+  // Defensive post-finalize stripper. Catches marker leftovers and
+  // orphan close-tags from unbalanced model HTML that ended up in
+  // DOM regions the streaming-time hide skipped. Anchored on marker
+  // substrings (no false positives on prose) and skips <code>/<pre>.
+  function stripFinalizeArtifacts() {
+    var msg = findMyMessage();
+    if (!msg) return;
+    var nodes = [];
+    try {
+      var walker = parent.document.createTreeWalker(
+        msg, NodeFilter.SHOW_TEXT, null
+      );
+      var t;
+      while ((t = walker.nextNode())) nodes.push(t);
+    } catch(e) { return; }
+
+    for (var i = 0; i < nodes.length; i++) {
+      var tn = nodes[i];
+      var v = tn.nodeValue || '';
+      if (!v) continue;
+      if (v.indexOf(START_MARK) === -1 && v.indexOf(END_MARK) === -1) continue;
+      var p = tn.parentNode, isCode = false;
+      while (p && p !== msg) {
+        if (p.nodeType === 1 &&
+            (p.tagName === 'CODE' || p.tagName === 'PRE')) {
+          isCode = true; break;
+        }
+        p = p.parentNode;
+      }
+      if (isCode) continue;
+      var cleaned = v
+        .split(START_MARK).join('')
+        .split(END_MARK).join('')
+        .replace(/<\/[a-z][a-z0-9]*\s*>/gi, '');
+      try { tn.nodeValue = cleaned.replace(/^\s+|\s+$/g, '') ? cleaned : ''; }
+      catch(e) {}
+    }
+  }
+
   function finalize(fullText) {
     if (finalized) return;
     finalized = true;
-    // Reconcile with scripts included — the reconciler materializes
-    // fresh script elements which execute on insertion.
+    // withScripts=true so the reconciler materializes script tags.
     renderSafeInto(fullText, true);
+    // Multi-shot strip — Svelte may flush chunks 1–2s after finalize
+    // fires; each run is idempotent.
+    try { stripFinalizeArtifacts(); } catch(e) {}
+    setTimeout(function() { try { stripFinalizeArtifacts(); } catch(e) {} }, 600);
+    setTimeout(function() { try { stripFinalizeArtifacts(); } catch(e) {} }, 1800);
+    setTimeout(function() { try { stripFinalizeArtifacts(); } catch(e) {} }, 4000);
     hideLoader();
     markAndAnimate(renderArea);
     // Nudge the height reporter across layout settle.
@@ -1806,20 +2315,10 @@ STREAMING_OBSERVER_SCRIPT = """
   }
 
   function isBlockClosed() {
-    var msg = findMyMessage();
-    if (!msg) return false;
     var idx = determineIndex();
     if (idx === null) idx = 0;
-    var text = getSearchableText(msg);
-    // True iff the idx-th block's full match contains END_MARK.
-    BLOCK_RE.lastIndex = 0;
-    var m, n = 0;
-    while ((m = BLOCK_RE.exec(text)) !== null) {
-      if (n === idx) return m[0].indexOf(END_MARK) !== -1;
-      n++;
-      if (m.index === BLOCK_RE.lastIndex) BLOCK_RE.lastIndex++;
-    }
-    return false;
+    var m = _ivResolveBlock(idx);
+    return !!m && m[0].indexOf(END_MARK) !== -1;
   }
 
   // Tick skips its whole pipeline when the searchable text is
@@ -1834,7 +2333,9 @@ STREAMING_OBSERVER_SCRIPT = """
     var msg = findMyMessage();
     if (!msg) return;
 
-    var currentText = getSearchableText(msg);
+    // Lax: tick on any text change, including reasoning-block edits
+    // (Bedrock-routed Haiku 4.5 streams the response inside reasoning).
+    var currentText = getSearchableText(msg, false);
     var textChanged = currentText !== lastMsgText;
     lastMsgText = currentText;
 
@@ -1846,7 +2347,10 @@ STREAMING_OBSERVER_SCRIPT = """
       wasStreaming = true;
     }
 
-    if (textChanged || forceHide) hideMarkerRange();
+    // allowWrap=false: streaming-safe (no text-node wrapping — would
+    // break Svelte's diff and stall post-VIZ chunks). finalize() runs
+    // the wrap-allowed pass once the response is complete.
+    if (textChanged || forceHide) hideMarkerRange(false);
 
     // Source-dependent work only runs on actual changes.
     if (!textChanged) return;
@@ -1966,16 +2470,19 @@ STREAMING_OBSERVER_SCRIPT = """
   }
 
   function pollTick() {
-    tick(false);
-    attachInnerObserver();
+    try { tick(false); } catch(e) {}
+    try { attachInnerObserver(); } catch(e) {}
   }
 
-  tick(false);
-  attachInnerObserver();
+  // Each bootstrap step is independently guarded — any one of them
+  // failing must not prevent the polling timer from being installed.
+  // Without the timer the iframe goes silently dormant.
+  try { tick(false); } catch(e) {}
+  try { attachInnerObserver(); } catch(e) {}
   try {
     new MutationObserver(function(records) {
-      tick(_ivHasChildListMutation(records));
-      attachInnerObserver();
+      try { tick(_ivHasChildListMutation(records)); } catch(e) {}
+      try { attachInnerObserver(); } catch(e) {}
     }).observe(parent.document.body, {
       childList: true, subtree: true, characterData: true
     });
@@ -1988,6 +2495,78 @@ STREAMING_OBSERVER_SCRIPT = """
 
 # Kept for backwards compatibility in case anything references the old name
 INJECTED_SCRIPTS = BODY_SCRIPTS
+
+
+# ---------------------------------------------------------------------------
+# srcdoc safety guard
+#
+# Every constant listed in _IFRAME_EMBEDDED_SCRIPTS below is concatenated
+# into an iframe's srcdoc. Once that srcdoc is parsed by the browser's
+# HTML5 tokenizer, the script-data state machine is sensitive to the
+# following literal byte sequences appearing ANYWHERE inside a script
+# body (including inside JS comments and string literals):
+#
+#   <!--           triggers "script data escape start"
+#   -->            exits  "script data escaped"
+#   <![CDATA[      same family of escape transitions
+#   ]]>            same
+#   <script        in escaped state, triggers "script data double escape start"
+#   </script>      in double-escaped state, exits back to escaped — does
+#                  NOT terminate the outer script
+#
+# When any of these appears inside a script body — even commented out —
+# the outer script's actual `</script>` tag stops terminating the
+# script. The IIFE then either never executes or executes incompletely,
+# producing the silent failure mode we hit in 2.1.0–2.1.2 (every
+# debugging path looks normal in isolation, but tick never runs).
+#
+# Always build these tokens via string concatenation in JS — never
+# write them as literals, not even inside comments. The guard below
+# raises at module load time so the plugin refuses to import if anyone
+# ever reintroduces one.
+_FORBIDDEN_SRCDOC_LITERALS = (
+    "<!--", "-->", "<![CDATA[", "]]>",
+    "<script", "</script",
+)
+
+
+def _assert_srcdoc_safe(name: str, body: str) -> None:
+    """Refuse to load if `body` contains any HTML token that would
+    confuse the iframe srcdoc's script-data state machine.
+
+    Each script body is allowed exactly ONE legitimate `<script>` and
+    one `</script>` — the wrapping tags themselves. Anything beyond
+    that count is a reintroduction of the bug fixed in 2.1.3.
+    """
+    open_count = body.count("<script")
+    close_count = body.count("</script")
+    if open_count > 1 or close_count > 1:
+        raise RuntimeError(
+            f"Inline Visualizer: {name} contains an extra <script> or "
+            f"</script> literal (open={open_count}, close={close_count}). "
+            "These break HTML5 srcdoc parsing — build them via string "
+            "concatenation in JS instead."
+        )
+    for tok in ("<!--", "-->", "<![CDATA[", "]]>"):
+        if tok in body:
+            raise RuntimeError(
+                f"Inline Visualizer: {name} contains a literal {tok!r}. "
+                "This puts the iframe srcdoc parser into script-data-escape "
+                "mode and silently breaks the IIFE. Concatenate it in JS "
+                "instead, even inside comments."
+            )
+
+
+_IFRAME_EMBEDDED_SCRIPTS = {
+    "THEME_DETECTION_SCRIPT": THEME_DETECTION_SCRIPT,
+    "BODY_SCRIPTS": BODY_SCRIPTS,
+    "CHIME_SCRIPT": CHIME_SCRIPT,
+    "STRICT_SECURITY_SCRIPT": STRICT_SECURITY_SCRIPT,
+    "STREAMING_OBSERVER_SCRIPT": STREAMING_OBSERVER_SCRIPT,
+}
+for _name, _body in _IFRAME_EMBEDDED_SCRIPTS.items():
+    _assert_srcdoc_safe(_name, _body)
+
 
 DOWNLOAD_BUTTON = (
     '<div id="iv-dl-wrap">'

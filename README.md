@@ -10,7 +10,7 @@ Each plugin lives in its own folder with a README explaining what it does, what 
 
 | Plugin | Description | Components |
 |--------|-------------|------------|
-| [Inline Visualizer v2](inline-visualizer-v2/) | ⭐ **NEW** ⭐ 🔹 **LIVE RENDERED** interactive HTML/SVG visualizations inline in chat. Full design system with theme-aware colors, SVG utilities, Chart.js/D3 support, and a six interactive bridges for conversational drill-down and hyper-interactive dashboards, charts and visualizations. | Tool + Skill |
+| [Inline Visualizer v2](inline-visualizer-v2/) | ⭐ **NEW** ⭐ 🔹 **LIVE RENDERED** interactive HTML/SVG visualizations inline in chat. Full design system with theme-aware colors, SVG utilities, Chart.js/D3 support, and six interactive bridges for conversational drill-down and hyper-interactive dashboards, charts and visualizations. | Tool + Skill |
 | [Email Composer](email-composer/) | AI-powered email drafting with an interactive Rich UI card. Rich text editing, To/CC/BCC chips, priority, download .eml, one-click send via mailto. | Tool |
 | [MCP App Bridge](mcp-app-bridge/) | Renders MCP Apps (SEP-1865) as Rich UI embeds. Connects to MCP servers, calls tools with `ui://` resources, injects server-declared CSP, and renders the HTML inline — no middleware changes needed. | Tool |
 | [Inline Visualizer](inline-visualizer/) | (v1 Legacy) - Interactive HTML/SVG visualizations inline in chat. Full design system with theme-aware colors, SVG utilities, Chart.js/D3 support, and a sendPrompt bridge for conversational drill-down. | Tool + Skill |

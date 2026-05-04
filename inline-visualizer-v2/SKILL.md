@@ -1,6 +1,6 @@
 ---
 name: visualize
-description: Render rich interactive visuals — SVG diagrams, HTML widgets, Chart.js charts, interactive explainers — directly inline in chat using the render_visualization tool. Use whenever the user asks to visualize, diagram, chart, draw, map out, or illustrate something, or when a topic has spatial, sequential, or systemic relationships a diagram would clarify better than prose. Also use proactively for data comparisons, metrics, architecture, processes, or mechanisms that benefit from a visual.
+description: Render rich interactive visuals — SVG diagrams, HTML widgets, Chart.js charts, interactive explainers — directly inline in chat using the render_visualization tool. Use whenever the user asks to visualize, diagram, chart, draw, map out, or illustrate something, or when a topic has spatial, sequential, or systemic relationships a diagram would clarify better than prose.
 ---
 
 # Inline Visualizer
@@ -12,11 +12,10 @@ Render rich interactive visuals directly inline in chat using `render_visualizat
 You call the tool with **only a title**, and then emit the HTML/SVG content wrapped in the **plain-text delimiters** `@@@VIZ-START` and `@@@VIZ-END`. The wrapper tails your stream and paints the iframe live.
 
 1. Call `render_visualization(title="…")`
-2. In your text response, write explanatory prose
-3. Open with `@@@VIZ-START` on its own line
-4. Emit the HTML/SVG **content fragment only** — **NEVER** wrap in `<!DOCTYPE>`, `<html>`, `<head>`, or `<body>` tags (the iframe already has these; duplicating them corrupts the DOM)
-5. Close with `@@@VIZ-END` on its own line
-6. Continue with any follow-up prose
+2. Open with `@@@VIZ-START` on its own line
+3. Emit the HTML/SVG **content fragment** (no `<!DOCTYPE>`, `<html>`, `<head>`, `<body>`)
+4. Close with `@@@VIZ-END` on its own line
+5. Continue with any follow-up text
 
 The raw markers + SVG source are auto-hidden from the chat — users see only the rendered iframe filling in live.
 
@@ -34,21 +33,115 @@ I'll visualize the attention mechanism for you.
 As you can see, each query token attends to all key tokens simultaneously.
 ```
 
-**Why plain-text delimiters, not a code fence?** The previous `` ```visualization `` protocol went through Open WebUI's CodeBlock / CodeMirror editor, which virtualizes content and drops scrolled-off lines from the DOM. The `@@@VIZ-START` / `@@@VIZ-END` markers are ordinary paragraph text — no editor, no virtualization, no edge cases.
-
 **Streaming rules:**
 - Use the delimiters EXACTLY `@@@VIZ-START` and `@@@VIZ-END` — case-sensitive, on their own lines. Do NOT put the content inside `` ``` ``, `~~~`, or `:::` fences.
 - Do NOT wrap in HTML tags like `<viz>` or `<svg data-iv>` — only the text markers are detected.
 - Emit **exactly ONE** `@@@VIZ-START` … `@@@VIZ-END` pair per tool call. For multiple visualizations, call the tool multiple times.
 - Structure the content as always: `<style>` first → visible content → `<script>` last.
 - Do NOT describe the HTML source in prose — users don't see it. Describe what the visualization **shows**.
-- Requires **iframe Sandbox Allow Same Origin** in Open WebUI Settings → Interface. If disabled, the wrapper shows a notice.
-- During streaming, `<script>` tags are deferred; they execute once the block stabilizes (≈800ms after the last chunk, or immediately on `@@@VIZ-END`). This avoids partial/repeat execution as tokens arrive.
+- Requires **iframe Sandbox Allow Same Origin** in Open WebUI Settings → Interface. If disabled, the wrapper shows a notice — and the user won't see the visualization itself, just the notice.
+- Any `<script>` you include runs once after the full block has streamed in.
 
 ## What's auto-injected
 
 - Theme CSS, SVG classes, color ramps, height reporting, `sendPrompt()` bridge, and `openLink()` bridge
+- Pre-styled bare-tag form elements (see below) — saves tokens on simple forms
 - Consider making diagrams **conversational** with `sendPrompt()` — see the [sendPrompt bridge](#sendprompt-bridge--conversational-diagrams) section for patterns and examples
+
+### Pre-styled form elements
+
+These tags get theme-aware default styling **when emitted without a `class`
+or inline `style` attribute**. Other attributes (`placeholder`, `value`,
+`id`, `aria-*`, `min`/`max`, etc.) are fine — they don't disable the
+defaults. Adding `class` or `style` is treated as an opt-out: the default
+is suppressed and you can style it from scratch. Useful for short forms or
+quick UIs where the design doesn't need to deviate.
+
+Pre-styled (bare):
+
+- `<button>` — themed button. Use it for actions.
+- `<input type="text|number|email|search|password|tel|url|date|time|datetime-local">` — themed text input. Use it where a user types or picks a value.
+- `<input type="range">` — slider. Use it for "from–to" picks, intensity dials, or any continuous value where exact precision doesn't matter.
+- `<input type="checkbox">`, `<input type="radio">` — multi-pick / single-pick. Self-explanatory.
+- `<textarea>` — multi-line text input.
+- `<select>` — dropdown. Use it when a list of choices is too long for radios.
+- `<label>`, `<fieldset>`, `<legend>` — form structure. Group related inputs and label them.
+- `<kbd>` — keyboard-key cap. Use it whenever you mention a shortcut, so the key visually pops as a key.
+  - Mac: `<kbd>⌘</kbd><kbd>K</kbd>`
+  - Windows / Linux: `<kbd>Ctrl</kbd><kbd>K</kbd>`
+- `<hr>` — horizontal divider. Separate sections inside a card or between groups of content.
+- `<details>` / `<summary>` — collapsible disclosure. Use it for progressive disclosure: hide secondary detail behind a clickable summary so the surface stays clean.
+- `<blockquote>` — pull-quote / callout. Use it to set apart a quote, an aside, or a piece of context the reader should pause on.
+- `<table>` (with `<thead>` / `<tbody>` / `<th>` / `<td>` / `<caption>`) — tabular data with multiple columns and rows. Use it when the relationship between rows and columns matters. For numeric columns add `align="right"` or `class="num"` to the cells (right-aligns + tabular-nums).
+- `<mark>` — highlighter. Use it sparingly to draw attention to a key word or number inside a sentence.
+- `<dl>` / `<dt>` / `<dd>` — definition lists. **Far cheaper than tables for label/value layouts**. Three modes:
+  - Bare `<dl>` → **stacked glossary**. Best when each term needs a sentence or two: definitions, FAQs, term-explained-below.
+  - `<dl data-layout="grid">` → **two-column card**. The lightweight alternative to a table when you have key/value pairs and don't need row separators or hover: contact cards, metadata blocks, summary panels, settings rows.
+  - `<dl data-layout="inline">` → **pill row** of `label: value` pairs (wrap each `<dt>`/`<dd>` in a `<div>`). Best for a tight strip of facts at the top of a card or near a chart: small numbers, status flags, tags. Colon separator is added automatically via CSS.
+
+Bonus on bare elements:
+
+- `aria-invalid="true"` paints a danger-colored border on input/textarea/select
+- `:focus-visible` keyboard focus draws a clear `--accent` outline (mouse focus stays subtle)
+
+```html
+<!-- Bare → defaults apply -->
+<label>Email <input type="email" placeholder="you@example.com"></label>
+<button onclick="submit()">Save</button>
+
+<!-- Custom — model owns the visual fully when class or style is present -->
+<button class="primary-cta">Get started</button>
+```
+
+### Accent color palette
+
+The default accent is **purple**. Switch to one of the other ramps via the
+`data-accent` attribute. The chosen color drives `--accent` and
+`--accent-foreground`, which in turn power focus rings, checkbox/radio
+fills, and any `var(--accent)` reference you write yourself. The same
+nine names match the chart color ramps, so a teal-accented form sits
+naturally next to a teal-accented chart.
+
+Available values: `purple` (default) · `teal` · `coral` · `pink` ·
+`gray` · `blue` · `green` · `amber` · `red`
+
+**Apply globally to the whole visualization** — wrap the entire content
+in a single root `<div data-accent="…">`. Every supported element inside
+inherits the chosen accent.
+
+```html
+<div data-accent="teal">
+  <style>/* CSS */</style>
+  …all focus rings, checkboxes, and var(--accent) consumers go teal…
+</div>
+```
+
+**Apply to a section** — set `data-accent` on any inner container to recolor
+just its subtree:
+
+```html
+<div data-accent="teal">
+  <button>Save</button>            <!-- teal focus ring -->
+  <input type="checkbox" checked>  <!-- teal accent -->
+</div>
+<button>Cancel</button>            <!-- still default purple -->
+```
+
+**Single element** — set directly on an element to recolor just it:
+
+```html
+<button data-accent="green">Approve</button>
+<button data-accent="red">Reject</button>
+```
+
+Both light and dark themes are handled — accent values track per-theme
+ramp stops automatically, and foreground text color flips for legibility
+in dark mode. No manual override needed.
+
+Pick an accent that matches the topic: `green` for finance/positive,
+`red` for warnings/critical actions, `blue` for informational dashboards,
+`amber` for attention/caution, etc. Default to `purple` for neutral or
+multi-purpose visualizations.
 
 ## Output rules
 
@@ -61,15 +154,15 @@ These rules keep visuals clean, accessible, and consistent with the host UI:
 - **Min font size 11px** — smaller becomes unreadable on most screens
 - **Text weights** — 400 regular, 500 for emphasis only
 - **All explanatory text goes in your prose response**, not inside the visual (keeps visuals data-dense and lets the model's response provide context)
-- **If the topic allows - build stunning visualizations** - Build dashboards, charts, graphs, interactive functions, animated sections, moving objects, explandable detail sections, cards, copyable text elements and more. If the topic allows and it makes sense for the topic, build complex and visually stunning elements.
+- **Build ambitiously when the topic supports it.** Treat each visualization like a small product surface, not a single static graphic. Combine multiple elements: a chart paired with a metric strip, a diagram with collapsible deep-dives, a comparison card with sliders that let the user explore tradeoffs. Use animation, hover, and click interactions where they help the reader notice or explore something — not for decoration. If the user asked for "a chart" and the topic naturally extends into a small dashboard, build the dashboard. Restraint is for cases where extra structure would distract; default to richness, not minimalism.
 
 ---
 
 ## Design system
 
-### CSS variables (auto-injected — always use these, never hardcode colors)
+### CSS variables (auto-injected — prefer these so light/dark mode just works)
 
-The tool injects theme-aware CSS variables that automatically adapt to light/dark mode. Hardcoding hex colors will break in one mode or the other.
+The tool injects theme-aware CSS variables that adapt to light/dark mode automatically. Use them by default for text, surface, and border colors; reach for a specific hex only when the design genuinely calls for a fixed color (a brand mark, a deliberate accent that shouldn't track the theme).
 
 | Token | Purpose |
 |-------|---------|
@@ -145,32 +238,49 @@ Always use this SVG boilerplate:
 
 ### SVG classes (auto-injected)
 
-| Class | Purpose |
-|-------|---------|
-| `.t` | 14px primary text |
-| `.ts` | 12px secondary text |
-| `.th` | 14px bold (500) primary text |
-| `.box` | Neutral rect (secondary bg, tertiary border) |
-| `.node` | Clickable element (cursor pointer, hover opacity) |
-| `.arr` | Arrow line (1.5px, border-secondary) |
-| `.leader` | Dashed guide line (0.5px, tertiary) |
-| `.c-{ramp}` | Color ramp on `<g>` — auto-sets fill/stroke on child rect/circle/ellipse and text colors |
+Drop these on SVG elements instead of writing inline `fill`, `stroke`, or
+`font-size`. They track the theme automatically.
 
-### Font width calibration
-- 14px: ~8px per character
-- 12px: ~7px per character
-- Box width = max(title_chars × 8, subtitle_chars × 7) + 24
+| Class | What it is | When to use |
+|-------|------------|-------------|
+| `.t` | 14px primary-color text | Default for any visible label inside a node, axis tick, or callout. |
+| `.ts` | 12px secondary-color text | Subtitles, captions, units (e.g. "users", "ms"), supporting text under a `.t` label. |
+| `.th` | 14px primary text, 500 weight | Node titles, KPI numbers, anything that needs to read as "the headline" of a small region. |
+| `.box` | Neutral rect — secondary bg, tertiary border | Default container for a labeled region. Use whenever you need a neutral chip / panel and don't have a semantic color. |
+| `.node` | Cursor-pointer + hover opacity on a `<g>` | Mark a `<g>` as clickable. Pair with `onclick="sendPrompt(...)"` so a user can drill into the topic. |
+| `.arr` | 1.5px stroke matching theme borders | Arrow lines and connectors. Combine with `marker-end="url(#arrow)"`. |
+| `.leader` | 0.5px dashed guide line | Pulling a label to a part of an illustration when the label can't sit on top of it. |
+| `.c-{ramp}` | Sets fill/stroke + text colors on a whole `<g>` from one of the 9 color ramps | Color a node by category — apply `.c-teal` (etc.) to a `<g>` and every shape and text inside picks up the matching ramp. |
 
-### Text positioning
-Every text inside a box needs `dominant-baseline="central"` with y at the vertical center of its slot. Without this, text sits ~4px too high and looks misaligned.
+### Sizing text inside boxes
+
+Browsers don't auto-size SVG boxes to text. To pick a width, estimate
+the rendered glyph width per character and size the box from the
+longest line.
+
+- 14px text (`.t`, `.th`) → ~8 px / character
+- 12px text (`.ts`) → ~7 px / character
+- `box_width = max(title_chars × 8, subtitle_chars × 7) + 24` (12 px padding each side)
+
+### Centering text in boxes
+
+`<text>` defaults to `dominant-baseline="alphabetic"` — `y` is the text's
+baseline, not its center, so a label placed at the vertical midpoint of
+a box actually sits ~4 px too high. For text inside a node, callout, or
+any rounded rect, add `dominant-baseline="central"` and put `y` at the
+box midpoint.
+
+Keep the default (no `dominant-baseline`) for text that's *meant* to sit
+on a baseline: axis tick labels (resting on the axis line), legend labels
+(aligned to the swatch baseline), and anything where the bottom edge of
+the glyphs is the visual anchor. Setting `central` on those will make
+them look ~4 px low instead.
 
 ---
 
 ## Diagram types
 
 ### Flowchart — sequential steps, decisions
-
-**When:** "walk me through the steps", "what's the process"
 
 - Max **4–5 nodes** per diagram — 6+ → decompose into overview + sub-flows
 - Box spacing: 60px between boxes, 24px padding inside
@@ -195,24 +305,29 @@ Two-line node:
 </g>
 ```
 
-### Structural — containment, architecture
+### Architecture — nested regions, layered systems
 
-**When:** "what's the architecture", "where does X live"
+For diagrams that show **what contains what**: services inside zones,
+modules inside layers, components inside subsystems. The nesting itself
+is the information — outer regions are the system, inner regions are
+the parts.
 
-- Outermost container: rx=20–24, lightest fill (50 stop), 0.5px stroke
-- Inner regions: rx=8–12, next shade, different ramp if semantically different
-- 20px min padding inside containers
-- Max 2–3 nesting levels
+- Outermost container: `rx=20–24`, lightest ramp fill (the 50 stop), 0.5px stroke
+- Inner regions: `rx=8–12`, a darker stop of the same ramp — or a different ramp when the inner region is semantically distinct (e.g. external service inside an internal cluster)
+- 20px minimum padding between an inner region's bounds and its parent's edge
+- Max 2–3 nesting levels — beyond that, decompose into a top-level overview plus sub-diagrams
 
-### Illustrative — spatial metaphors, mechanisms
+### Illustrative — explain a mechanism by drawing it
 
-**When:** "how does X actually work", "explain X" (spatial concept)
+For "how does this actually work" topics where the answer is spatial:
+how light refracts through a prism, how a transformer attention head
+weighs tokens, how a heat pump moves heat against a gradient. **Draw
+the thing itself**, not a labeled diagram about it.
 
-- Draw the **mechanism**, not a diagram about it
-- Shapes are freeform — paths, ellipses, polygons, curves
-- Color encodes intensity (warm = active, cool = calm, gray = inert)
-- Labels: outside the object with leader lines, reserve 140px margin
-- **Prefer interactive over static** — if the system has a control, give the diagram that control
+- Shapes are freeform — paths, ellipses, polygons, curves — not just rounded rects
+- Color encodes intensity or state, not category: warm ramps for active / hot / energized, cool ramps for calm / cold / passive, gray for neutral / inert
+- Labels live outside the object connected via `.leader` lines — reserve a ~140px gutter on the side you'll label from
+- Strongly prefer **interactive** illustrative diagrams: if the real system has a knob, a slider, or a phase, expose it. A prism with a draggable angle slider teaches refraction better than five static frames.
 
 ---
 
@@ -254,9 +369,9 @@ new Chart(ctx, {
 ```
 
 **Chart rules:**
-- Wrap canvas in container with `position: relative` and explicit height
-- Always `responsive: true`, `maintainAspectRatio: false`
-- Read CSS variables for text/border colors — never hardcode
+- Wrap canvas in container with `position: relative` and explicit height — without it, `maintainAspectRatio: false` collapses the canvas to zero
+- Always pass `responsive: true, maintainAspectRatio: false` in `options` — without `maintainAspectRatio: false`, Chart.js locks the canvas to a 2:1 aspect and ignores the container height; without `responsive: true`, it won't redraw when the iframe re-measures. You have to set them explicitly on every `new Chart(...)` call (Chart.js reads options at construction time, so there's no global default we could pre-set for you).
+- Read CSS variables for text/border colors so the chart tracks the theme
 - `borderRadius: 4` on bars
 - Line charts: `tension: 0.3` for smooth curves
 - Doughnut: `cutout: '60%'` — never use pie
@@ -265,43 +380,217 @@ new Chart(ctx, {
 
 | Data shape | Type | Notes |
 |-----------|------|-------|
-| Categories + values | Bar | Horizontal if labels are long |
-| Time series | Line | tension: 0.3 |
-| Parts of whole | Doughnut | cutout: '60%' |
-| Two variables | Scatter | Add trend line if relevant |
+| Categories + values (a few items, comparable magnitudes) | **Bar** | Default for "compare values across labels". Switch to a horizontal bar (`indexAxis: 'y'`) when labels are long, when there are 8+ categories, or when ranking is the point. |
+| Time series, anything sampled at regular intervals | **Line** | `tension: 0.3` for a natural curve. Stack multiple datasets when you're comparing trends, not when each line wanders independently — overlap gets unreadable past 4 lines. |
+| Parts of a whole, ≤5 slices | **Doughnut** | Use `cutout: '60%'` so the empty middle can hold a total or label. Skip if the segments are very uneven (one slice >70%) — the small slices vanish; show a stacked bar instead. |
+| Two continuous variables, looking for correlation | **Scatter** | Add a trend line if the relationship is the takeaway. For dense clouds, drop point opacity to 0.3–0.5 so density reads. |
+| Stacked / cumulative composition over time | **Stacked bar / stacked area** | Bar when the buckets are discrete (months, segments); area when the underlying signal is continuous. |
+| Single-value vs target / threshold | **Bar with reference line** or KPI card | A whole chart is overkill for one number — consider a metric card with a sparkline instead. |
+| Multi-dimensional comparison (3–6 axes) | **Radar** | Only when the axes are genuinely commensurate — otherwise a small-multiples bar grid is clearer. |
 
 ### Inline SVG charts (no library)
 
-Horizontal bar:
-```svg
-<svg width="100%" viewBox="0 0 680 80">
-  <text class="ts" x="40" y="30">Category A</text>
-  <rect x="160" y="16" width="360" height="20" rx="4" fill="#1D9E75" opacity="0.8"/>
-  <text class="ts" x="530" y="30">72%</text>
-</svg>
-```
+Reach for inline SVG when the data is small, the shape is simple, or
+you want the chart to share design with surrounding diagrams (matching
+corner radii, palette, type). No script, no CDN — just shapes and text.
+Reach for Chart.js when you need axes, tooltips, hover, animation, or
+many series.
+
+**Good fits for inline SVG:**
+- **Progress / completion bar** — a value rendered against a fixed track,
+  often paired with a percentage label to its right
+- **Ranking strip** — a small number of horizontal bars stacked
+  vertically, each bar a different category color, sized by value
+- **Sparkline** — a terse trend line with no axes that sits next to a
+  number to give the number context
+- **KPI donut / ring** — a single percentage rendered as a circle arc,
+  with the number in the middle of the ring
+- **Stacked composition row** — one horizontal bar split into colored
+  segments to show parts of a whole, when a doughnut would feel heavy
+- **Custom-shape charts** — anything where the chart shape is part of
+  the metaphor (a thermometer for temperature, a battery for charge,
+  a fuel gauge, a tide-line)
+
+**Theme consistency for inline SVG:**
+- Use the `.t` / `.ts` / `.th` classes on `<text>` for labels, captions,
+  and headlines. They pick up the theme's text colors and typography
+  scale automatically. Never set `font-size` or `fill` on label text
+  manually unless you need a specific deviation.
+- For neutral backgrounds (track behind a progress bar, empty slot in a
+  ring), use `fill="var(--color-bg-secondary)"` so it blends into the
+  surrounding card.
+- For data colors, prefer the chart-dataset 400-stop hexes from the
+  table above — they're calibrated to read on both light and dark
+  backgrounds. If you need a *whole group* recolored (rect + label +
+  stroke together), wrap it in a `<g class="c-teal">` (or any of the
+  9 ramp classes) and let the SVG class system handle fill + stroke +
+  text in one shot.
+- Keep stroke-widths to 0.5 px for chrome (axis lines, grid) and
+  1.5 px for data (lines, sparklines) — matches the 0.5 px borders
+  the rest of the host UI uses, so the chart doesn't feel chunkier
+  than its neighbors.
+- Add `opacity="0.85"` on data fills — softens the color slightly so
+  it sits comfortably next to text without overwhelming it.
+
+**Math hints for the less obvious shapes:**
+- Donut arc length: circumference = `2 × π × r`. To draw `v%` of the
+  ring, set `stroke-dasharray="{v×circumference/100} {circumference}"`
+  on the foreground circle, and `transform="rotate(-90 cx cy)"` so the
+  arc starts at 12 o'clock instead of 3 o'clock.
+- Bar widths in a `viewBox="0 0 680 …"`: leave 40 px of margin on each
+  side, giving a 600 px usable plot width.
 
 ---
 
 ## Component patterns
 
-### Metric cards
+### Metric cards — KPI strip
 ```html
 <div style="display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px;">
   <div style="background:var(--color-bg-secondary); border:0.5px solid var(--color-border-tertiary);
     border-radius:var(--radius-lg); padding:16px;">
-    <div style="font-size:12px; color:var(--color-text-secondary);">Label</div>
+    <div style="font-size:12px; color:var(--color-text-secondary);">Revenue</div>
     <div style="font-size:28px; font-weight:500; color:var(--color-text-primary); margin-top:4px;">$3,870</div>
+    <div style="font-size:12px; color:var(--color-text-success); margin-top:2px;">▲ 12.4%</div>
   </div>
-  <!-- repeat -->
+  <!-- repeat for other metrics -->
+</div>
+```
+Pair with a chart below for a compact dashboard. Add a tiny inline-SVG
+sparkline under each value if the trend matters.
+
+### Comparison layout — two paths side by side
+```html
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+  <div style="background:var(--color-bg-secondary); border:0.5px solid var(--color-border-tertiary);
+    border-radius:var(--radius-lg); padding:18px;">
+    <div style="font-size:14px; font-weight:500;">Monolith</div>
+    <dl data-layout="grid" style="margin-top:12px;">
+      <dt>Deploy unit</dt><dd>1 service</dd>
+      <dt>Latency</dt><dd>Low (in-process)</dd>
+      <dt>Scaling</dt><dd>Vertical</dd>
+    </dl>
+  </div>
+  <div style="background:var(--color-bg-secondary); border:0.5px solid var(--color-border-tertiary);
+    border-radius:var(--radius-lg); padding:18px;">
+    <div style="font-size:14px; font-weight:500;">Microservices</div>
+    <dl data-layout="grid" style="margin-top:12px;">
+      <dt>Deploy unit</dt><dd>N services</dd>
+      <dt>Latency</dt><dd>Higher (network)</dd>
+      <dt>Scaling</dt><dd>Horizontal per service</dd>
+    </dl>
+  </div>
 </div>
 ```
 
-### Comparison layout
-Side-by-side cards with a shared header row, metrics in each column.
+### Interactive explainer — slider drives output
+```html
+<label style="display:flex; gap:12px; align-items:center;">
+  <span style="min-width:80px;">Interest</span>
+  <input type="range" id="rate" min="0" max="20" step="0.1" value="5" style="flex:1;">
+  <span id="rate-out" style="min-width:48px; font-variant-numeric:tabular-nums;">5.0%</span>
+</label>
+<div id="result" style="margin-top:12px; font-size:24px; font-weight:500;"></div>
 
-### Interactive explainer
-Sliders or buttons that update visible state via JavaScript. Example: a slider controlling a variable with a live-updating SVG or value display.
+<script>
+var rate = document.getElementById('rate');
+var out = document.getElementById('rate-out');
+var result = document.getElementById('result');
+function recalc() {
+  var r = parseFloat(rate.value);
+  out.textContent = r.toFixed(1) + '%';
+  result.textContent = '$' + (10000 * Math.pow(1 + r/100, 10)).toFixed(0);
+}
+rate.addEventListener('input', recalc);
+recalc();
+</script>
+```
+The pattern generalises: every interactive element binds an `input`
+listener, recomputes a value, and writes it to a result node. Pair with
+an inline SVG that re-draws on every input change for a "live diagram".
+
+### Tabs — a piece of UI users already know
+```html
+<div style="display:flex; gap:4px; border-bottom:0.5px solid var(--color-border-tertiary);">
+  <button class="tab active" onclick="showTab('a', this)">Overview</button>
+  <button class="tab" onclick="showTab('b', this)">Details</button>
+  <button class="tab" onclick="showTab('c', this)">Source</button>
+</div>
+<div id="tab-a" class="tab-panel">…</div>
+<div id="tab-b" class="tab-panel" hidden>…</div>
+<div id="tab-c" class="tab-panel" hidden>…</div>
+
+<style>
+  .tab { background:none; border:none; padding:8px 12px; cursor:pointer;
+         border-bottom:2px solid transparent; }
+  .tab.active { border-bottom-color: var(--accent); color: var(--color-text-primary); }
+  .tab-panel { padding:12px 0; }
+</style>
+
+<script>
+function showTab(id, btn) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.hidden = true);
+  document.getElementById('tab-' + id).hidden = false;
+  document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+</script>
+```
+Persist the active tab with `saveState`/`loadState` so it survives reloads.
+
+**Charts in inactive tabs render at 0×0.** Plotly, ECharts, and
+vis-network all measure their container at init time. If that container
+is inside a `hidden` / `display:none` panel, they paint into a zero-size
+canvas and stay blank even after the tab becomes visible. Two
+workarounds, pick one:
+
+1. **Lazy-init**: only call `Plotly.newPlot` / `echarts.init` /
+   `new vis.Network` the first time its tab is shown (track a
+   `tabInit[id]` flag in the handler).
+2. **Resize on show**: init everything up front (so data is ready), then
+   in `showTab` call the right resize hook for whichever lib is in that
+   tab. Note the API differs per library — `c.resize()` does not work
+   for all of them:
+
+   ```js
+   // ECharts: instance.resize()
+   echartsInstance.resize();
+   // Plotly: pass the container element, no .resize() on the chart
+   Plotly.Plots.resize(document.getElementById('plotly-container'));
+   // vis-network: redraw + fit — the instance has no .resize()
+   networkInstance.redraw();
+   networkInstance.fit();
+   // Chart.js: instance.resize() — but Chart.js auto-resizes on
+   // container size change so usually nothing needed.
+   ```
+
+   Skip the resize call for D3 / Vega-Lite / inline SVG — they paint
+   declaratively into the SVG namespace and aren't bothered by hidden
+   parents.
+
+### Step-through walkthrough — guided narrative
+A "Next ▶" button advances through a sequence of stages, each with its
+own caption and (optionally) a different highlighted region of the same
+diagram. Useful for explaining algorithms, processes, or any topic where
+the order matters more than the totals.
+```html
+<div id="stage" style="font-size:14px;">Click Next to begin.</div>
+<button onclick="step()">Next ▶</button>
+
+<script>
+var steps = [
+  'Step 1: request lands at the load balancer',
+  'Step 2: routed to a healthy backend',
+  'Step 3: backend writes to primary DB',
+  'Step 4: replica catches up async',
+];
+var i = 0;
+function step() {
+  document.getElementById('stage').textContent = steps[i % steps.length];
+  i++;
+}
+</script>
+```
 
 ---
 
@@ -315,10 +604,6 @@ This is what separates a static diagram from an **exploration interface**. A use
 
 Without sendPrompt, interactive elements inside the iframe are isolated — they can toggle visibility, animate, or filter data, but they can never talk back to the model. The user sees a cool diagram but has to manually type follow-up questions. With sendPrompt, every clickable element becomes a conversation starter. The diagram itself becomes a navigation interface for the topic.
 
-### How it works technically
-
-The function is auto-injected by the tool. It uses Open WebUI's native `postMessage` protocol to submit the text as a user message. If the AI is still generating a response, the message is automatically queued and sent once generation completes. This requires **iframe Sandbox Allow Same Origin** to be enabled in Open WebUI settings — without it, the function silently fails (the visualization still works, but clicks do nothing).
-
 ### Writing good sendPrompt text
 
 The text you pass to sendPrompt becomes the user's message to the model. Write it as a natural follow-up question — conversational, specific, and referencing the context of the diagram:
@@ -329,11 +614,6 @@ The text you pass to sendPrompt becomes the user's message to the model. Write i
 - `"Show me a more detailed diagram of the data processing layer"`
 - `"What happens when the load balancer detects a failed backend node?"`
 - `"Compare the pros and cons of the monolith vs microservices approach shown here"`
-
-**Bad prompt text** (vague, generic, loses context):
-- `"Tell me more"` — more about what?
-- `"Explain"` — explain what?
-- `"Details"` — not a sentence, model won't know what to do
 
 ### Usage patterns
 
@@ -467,34 +747,42 @@ Values are JSON-serialized. If `localStorage` is blocked (private browsing, sand
 
 ---
 
-## CDN libraries — batteries included
+## CDN libraries
 
-The strict-mode CSP allowlists three major CDN hosts, so the model can load **any library** served from them without touching any plugin setting. Prefer these over self-hosted paths for reliability.
+Strict-mode CSP allowlists three CDN hosts. Anything served from them
+loads — no plugin tweaking needed, even in strict security mode.
 
 Allowed hosts:
-- `cdnjs.cloudflare.com` — Cloudflare's CDN, widest coverage
-- `cdn.jsdelivr.net` — npm / GitHub-backed, good for minor-version pinning
-- `unpkg.com` — npm mirror, same as jsdelivr
+- `cdnjs.cloudflare.com` — widest coverage
+- `cdn.jsdelivr.net` — npm / GitHub backed, supports minor-version pinning
+- `unpkg.com` — npm mirror
 
-Recommended libraries for visualization work:
+Common picks:
 
 | Library | Why reach for it | Example loader |
 |---------|------------------|----------------|
-| **Chart.js** | Bar / line / doughnut / scatter charts with animation out of the box | `<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>` |
+| **Chart.js** | Bar / line / doughnut / scatter with animation out of the box | `<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>` |
 | **D3.js** | Custom data-driven SVG (force graphs, arcs, maps, non-standard charts) | `<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>` |
 | **Vega-Lite** | Declarative grammar of graphics — feed it a JSON spec, it draws the chart | `<script src="https://cdn.jsdelivr.net/npm/vega@5"></script><script src="https://cdn.jsdelivr.net/npm/vega-lite@5"></script><script src="https://cdn.jsdelivr.net/npm/vega-embed@6"></script>` |
+| **ECharts** | Rich interactive dashboards, advanced chart types | `<script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.5.0/echarts.min.js"></script>` |
+| **Plotly** | Scientific / 3D plots, statistical charts | `<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist@2"></script>` |
+| **vis-network** | Force-directed network / node-link graphs | `<script src="https://cdn.jsdelivr.net/npm/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>` (the **standalone** UMD bundle — exposes `vis.Network` *and* `vis.DataSet`. The bare `vis-network.min.js` on cdnjs is the *peer* build and requires `vis-data` loaded separately, otherwise `new vis.DataSet(...)` throws `vis is not defined`.) |
+| **Tone.js / Wavesurfer** | Audio synthesis, waveform visualisation | `<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/15.0.4/Tone.js"></script>` |
 
-Any other library on those three CDNs also works — vis-network, d3-force, echarts, apexcharts, plotly, tone.js, wavesurfer, etc. The host auto-detects completion and executes your `<script>` block once the fence stabilizes.
+Anything else on those three CDNs is fair game — `apexcharts`, `d3-force`,
+`konva`, `flatpickr`, etc. Pick whatever fits the topic.
 
 ---
 
-## Library init — avoid silent failures
+## Library init
 
-Inline scripts run the instant the iframe reconciler inserts them, which is usually BEFORE the browser has finished laying out the elements you just added. Two cases bite:
+Two patterns to follow when using a CDN library:
 
-### 1 · Chart.js — wrap the canvas in a fixed-height container
+### 1 · Wrap a Chart.js canvas in a fixed-height container
 
-Chart.js inherits width from the container and uses `maintainAspectRatio: false` to respect your height. If the canvas is loose inside a flex container with no intrinsic height, the canvas collapses to zero and nothing draws:
+`maintainAspectRatio: false` makes Chart.js use the container's height.
+If the canvas has no intrinsic height (e.g. inside a flex column without
+a height set), it collapses to zero and nothing draws:
 
 ```html
 <div style="position: relative; height: 260px;">
@@ -509,44 +797,14 @@ Chart.js inherits width from the container and uses `maintainAspectRatio: false`
 </script>
 ```
 
-### 2 · Script order
+### 2 · Source order matters
 
-External `<script src="…">` tags and the inline `<script>` that uses them run in **insertion order** (the host forces `async=false` on every dynamically-inserted script). Put external libraries first, your consumer script last:
+Put external `<script src="…">` tags **before** the inline `<script>` that
+uses them. They execute in order, so a consumer that runs before its
+library is loaded will fail with `Chart is not defined`.
 
 ```html
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
 <script>/* uses Chart and d3 */</script>
 ```
-
-You do NOT need `DOMContentLoaded` or `window.onload` wrappers — by the time your script runs, the entire fragment (except any later-positioned siblings) is already in the DOM.
-
----
-
-## Quick reference
-
-| Rule | Value |
-|------|-------|
-| SVG viewBox width | Always 680px |
-| Font sizes | 14px labels, 12px subtitles |
-| Stroke width | 0.5px for borders |
-| Max colors per diagram | 2–3 ramps |
-| Subtitle max length | 5 words |
-| Corner radius (SVG) | rx=4 default, rx=8 emphasis |
-| Corner radius (HTML) | var(--radius-md) or -lg |
-| Min font size | 11px |
-| Heading sizes | h1=22px, h2=18px, h3=16px |
-
-## Common failures
-
-1. **Arrow through a box** — trace coordinates against every box
-2. **Text overflow** — check (text_width + 2×padding) fits the rect
-3. **viewBox too small** — content clipped at bottom
-4. **viewBox too large** — creates wasteful empty space below the diagram. Calculate actual content bottom + 40px
-5. **Floating labels** — every text needs a box, legend, or leader line
-6. **Connector without fill="none"** — renders as black shape
-7. **Missing dominant-baseline="central"** — text sits 4px too high
-8. **Missing arrow marker in defs** — always include it
-9. **Hardcoded colors** — always use CSS variables or ramp classes
-10. **Chart.js canvas collapsed to 0 height** — wrap every canvas in `<div style="position: relative; height: Xpx;">` and set `maintainAspectRatio: false`
-11. **Document wrapper tags** — never emit `<!DOCTYPE>`, `<html>`, `<head>`, or `<body>`. The iframe shell already provides these. Including them mangles the DOM and breaks script execution
