@@ -11,7 +11,7 @@ Render rich interactive visuals directly inline in chat using `render_visualizat
 
 You call the tool with **only a title**, and then emit the HTML/SVG content wrapped in the **plain-text delimiters** `@@@VIZ-START` and `@@@VIZ-END`. The wrapper tails your stream and paints the iframe live.
 
-1. Call `render_visualization(title="…")`
+1. Call `render_visualization(title="…")` - YOU MUST CALL THE TOOL, otherwise the visualization you output will not be rendered in the chat.
 2. Open with `@@@VIZ-START` on its own line
 3. Emit the HTML/SVG **content fragment** (no `<!DOCTYPE>`, `<html>`, `<head>`, `<body>`)
 4. Close with `@@@VIZ-END` on its own line
