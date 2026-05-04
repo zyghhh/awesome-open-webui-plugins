@@ -23,13 +23,20 @@ Legend: 🚫 feature not in that version · ⚡ present, v2 expands it · ✅ pr
 | **Protocol** | ✅ Model calls `render_visualization(title=…, html_code=…)` with the full HTML as a tool argument. Tool returns `HTMLResponse`, Open WebUI mounts it as an iframe via `message.embeds[]`. One-shot, server-side. | ✅ Model calls `render_visualization(title=…)` with no body, then emits the HTML/SVG in the chat stream between plain-text `@@@VIZ-START … @@@VIZ-END` markers. A parasitic same-origin iframe observer reads the parent chat's live DOM and paints as tokens arrive. |
 | **Refresh / reload behavior** | ✅ Saved HTML lives in `message.embeds[]`; reopens render instantly. | ✅ Markers live in the saved message body; observer reconstructs iframe state and fires `finalize()` immediately on mount. No re-streaming needed. |
 | **Bridges** | ⚡ `sendPrompt`, `openLink` | ✅ `sendPrompt`, `openLink`, **`copyText`** (auto-toast), **`toast(msg, kind)`** (success/info/warn/error, auto-dismiss), **`saveState(k,v)`** / **`loadState(k,fallback)`** (per-message `localStorage` scope, survives reloads) |
+| **Pre-styled bare HTML** | 🚫 N/A — model styles every primitive from scratch. | ✅ Drop a vanilla `<button>`, `<input>` (every common type), `<textarea>`, `<select>`, `<label>`, `<fieldset>`, `<table>`, `<details>` / `<summary>`, `<blockquote>`, `<kbd>`, `<hr>`, `<mark>`, `<dl>` (in `data-layout="grid"` and `inline` modes too) and they come out theme-matched. Adding `class` or `style` opts out — model can still go fully custom. **Smaller payloads, faster generation, consistent look across visualizations.** |
+| **Accent palette** | 🚫 N/A | ✅ `data-accent="teal"` (or `coral`, `pink`, `gray`, `blue`, `green`, `amber`, `red`) on any element recolors focus rings, checkboxes, radios, and `var(--accent)` consumers. 9 named values matching the chart ramps. Light/dark handled per-theme. |
+| **Accessibility defaults** | 🚫 N/A | ✅ `aria-invalid="true"` paints a red border on inputs/textareas/selects; `:focus-visible` draws a clear accent outline on keyboard focus only (mouse focus stays subtle). |
+| **CDN library catalog in skill** | ⚡ Chart.js, D3.js examples | ✅ Chart.js, D3.js, Vega-Lite, **ECharts**, **Plotly**, **vis-network** (standalone bundle), **Tone.js / Wavesurfer** — each with a vetted CDN URL and "when to reach for it" guidance. Allowlisted in strict CSP out of the box. |
+| **Chart-type coverage in skill** | ⚡ Bar / line / doughnut / scatter | ✅ Adds stacked bars/areas, radar, KPI cards with sparklines, progress bars, ranking strips, KPI donuts, custom-shape charts (thermometers, batteries, fuel gauges), plus comparison cards, slider-driven explainers, tabs (with hidden-panel init guidance), step-through walkthroughs. |
 | **Stream-completion feedback** | 🚫 N/A — no stream. | ✅ Localized "Visualization ready" toast in the top-right + an optional soft chime. Fires only when a real stream was seen — reopening a finished chat stays quiet. The chime is off-switchable via the `chime` valve (off → chime code isn't shipped at all). |
 | **i18n surface** | ⚡ 1 string × 46 languages = 46 translations (download tooltip) | ✅ 5 strings × 46 languages = **230 translations** — download tooltip, loader label, "unavailable" notice, "Copied" toast, "Visualization ready" toast. Auto-detected from `<html data-iv-lang>`, `localStorage.locale`, and `navigator.language`. |
-| **Mid-stream reconciler** | 🚫 N/A — the iframe is built once from a complete payload. | ✅ Custom safe-cut HTML parser flushes the longest valid prefix on each chunk. Incremental DOM reconciler only appends new nodes — **existing nodes never re-mount, animations never re-trigger, zero flicker**. |
+| **Mid-stream reconciler** | 🚫 N/A — the iframe is built once from a complete payload. | ✅ Custom safe-cut HTML parser flushes the longest valid prefix on each chunk. Incremental DOM reconciler only appends new nodes and **leaves script-populated containers alone** so `d3.select(...).append('svg')`, `new vis.Network(...)`, ECharts canvases, etc. survive the final paint pass. **Existing nodes never re-mount, animations never re-trigger, zero flicker.** |
 | **Per-tick efficiency** | 🚫 N/A | ✅ `msg.textContent` cached between ticks; unchanged → full pipeline (regex extract, DOM walk, reconciler) short-circuits to a string compare. Only one tick per real DOM mutation does real work. |
-| **Dynamic script injection** | 🚫 N/A — scripts come baked into the static srcdoc and are parsed by the browser normally. | ✅ External `<script src>` + inline scripts injected at finalize() are **serialized via a Promise chain**. Each script awaits `onload` of all previously-queued scripts before executing. `Chart`, `d3`, `vega-embed` etc. are guaranteed defined before consumer code runs. |
-| **Script-boundary safety** | 🚫 N/A — the browser parses the srcdoc once, no re-injection. | ✅ Safe-cut parser tracks the tokenizer state across HTML's script-data-escape and double-escape transitions, so embedded `<!--` / `<script` literals inside the model's code can't break our enclosing script tags. |
-| **Tool-result-example bleed** | 🚫 N/A — observer doesn't scan chat DOM. | ✅ TreeWalker excludes `<details type="tool_calls" \| reasoning \| code_execution \| code_interpreter>` when scanning, so the skill's own example markers inside the tool-call details never hijack the regex. |
+| **Dynamic script injection** | 🚫 N/A — scripts come baked into the static srcdoc and are parsed by the browser normally. | ✅ External `<script src>` + inline scripts injected at finalize() are **serialized via a Promise chain**. Each link wrapped + `.catch`'d so a single bad script can't stall the rest. `Chart`, `d3`, `vega-embed` etc. are guaranteed defined before consumer code runs. |
+| **Script-boundary safety** | 🚫 N/A — the browser parses the srcdoc once, no re-injection. | ✅ Safe-cut parser tracks the tokenizer state across HTML's script-data-escape and double-escape transitions. **Module-load guard** refuses to start the plugin if any embedded script body contains a literal `<!--`, `<script>`, etc. that would silently break the IIFE. |
+| **Tool-result-example bleed** | 🚫 N/A — observer doesn't scan chat DOM. | ✅ TreeWalker excludes `<details type="tool_calls" \| reasoning \| code_execution \| code_interpreter>` when scanning, with a lax fallback that recovers responses from providers that wrap the visible answer inside a reasoning block (Bedrock-hosted Haiku 4.5). |
+| **Bootstrap resilience** | 🚫 N/A | ✅ Initial tick, inner observer, parent observer, and poll timer each independently guarded — any one failure can't leave the iframe silently dormant. Height reporter collapses `100vh` / `100vw` descendants during measurement to break the feedback loop. |
+| **Standalone HTML export** | ⚡ Save HTML → opens fine. | ✅ Imported library scripts are relocated to the end of `<body>` before serialization so charts paint correctly when the file is opened directly (head-loaded scripts otherwise run before their target divs exist). |
 | **Plugin footprint** | ✅ `tool.py` + `SKILL.md` | ✅ Same two files, same install flow — **no Open WebUI core patches**. |
 
 ### The one-line summary
@@ -55,7 +62,9 @@ Auto-detects the user's language from `<html data-iv-lang>` (injected server-sid
 - **9 color ramps** — purple, teal, coral, pink, gray, blue, green, amber, red — each with fill / stroke / text variants that auto-swap for light/dark mode
 - **SVG utility classes** — `.t` `.ts` `.th` text, `.box` `.node` `.arr` `.leader` shapes, `.c-{ramp}` color application
 - **Theme CSS variables** — dozens of aliases (`--bg`, `--fg`, `--surface`, `--border`, …) so the model can hardcode without breaking light/dark parity
-- **Base element styles** — themed `button`, `input[type=range]`, `select`, `code`, `h1`–`h3`, `p`
+- **`data-accent` palette** — set `data-accent="teal"` on any element (root, container, or single tag) to recolor focus rings, checkboxes, radios, and `var(--accent)` consumers. 9 named values matching the chart ramps. Light/dark handled per-theme.
+- **Pre-styled bare HTML** — drop a vanilla `<button>`, `<input>` (every common type — `text`, `email`, `number`, `range`, `date`, `checkbox`, `radio`, …), `<textarea>`, `<select>`, `<label>`, `<fieldset>`, `<legend>`, `<table>`, `<details>` / `<summary>`, `<blockquote>`, `<kbd>`, `<hr>`, `<mark>`, `<dl>` (in `data-layout="grid"` and `data-layout="inline"` modes too) and they come out themed. Add `class` or `style` to opt out. Saves tokens on simple UIs without locking the design space.
+- **Accessibility defaults** — `aria-invalid="true"` paints a red border on inputs/textareas/selects; `:focus-visible` draws a clear accent outline on keyboard focus only.
 
 ### 🌉 Bridges — visualizations that talk back
 
@@ -254,7 +263,22 @@ Apply via CSS class on any `<g>` — child `<rect>`, `<circle>`, `<ellipse>` get
 | `.c-{ramp}` | Apply a color ramp to all descendants |
 
 ### Themed HTML elements
-Buttons, sliders, selects, code blocks, headings, paragraphs all get themed styles out of the box. The model writes `<button>` and gets a themed button — no class needed.
+
+A wide set of bare tags ship with theme-aware default styling. The model
+writes `<button>`, `<select>`, `<table>`, `<details>` etc. and gets
+polished output — no class or inline style needed.
+
+| Group | Tags |
+|---|---|
+| **Forms** | `<button>` · `<input>` (`text`, `email`, `number`, `search`, `password`, `tel`, `url`, `date`, `time`, `datetime-local`, `range`, `checkbox`, `radio`) · `<textarea>` · `<select>` · `<label>` · `<fieldset>` · `<legend>` |
+| **Tables** | `<table>` · `<thead>` · `<tbody>` · `<th>` · `<td>` · `<caption>` (numeric cells: `align="right"` or `class="num"` → tabular-nums) |
+| **Disclosure** | `<details>` / `<summary>` (rotating chevron) |
+| **Inline** | `<kbd>` · `<mark>` · `<code>` · `<blockquote>` · `<hr>` |
+| **Definition lists** | `<dl>` in three layouts — bare (stacked glossary), `data-layout="grid"` (two-column card), `data-layout="inline"` (pill row) |
+
+Adding a `class` or `style` attribute to any of these opts out of the
+default styling — the model can still go fully custom when the design
+calls for it.
 
 ---
 
