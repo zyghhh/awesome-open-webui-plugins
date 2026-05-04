@@ -538,6 +538,36 @@ function showTab(id, btn) {
 ```
 Persist the active tab with `saveState`/`loadState` so it survives reloads.
 
+**Charts in inactive tabs render at 0×0.** Plotly, ECharts, and
+vis-network all measure their container at init time. If that container
+is inside a `hidden` / `display:none` panel, they paint into a zero-size
+canvas and stay blank even after the tab becomes visible. Two
+workarounds, pick one:
+
+1. **Lazy-init**: only call `Plotly.newPlot` / `echarts.init` /
+   `new vis.Network` the first time its tab is shown (track a
+   `tabInit[id]` flag in the handler).
+2. **Resize on show**: init everything up front (so data is ready), then
+   in `showTab` call the right resize hook for whichever lib is in that
+   tab. Note the API differs per library — `c.resize()` does not work
+   for all of them:
+
+   ```js
+   // ECharts: instance.resize()
+   echartsInstance.resize();
+   // Plotly: pass the container element, no .resize() on the chart
+   Plotly.Plots.resize(document.getElementById('plotly-container'));
+   // vis-network: redraw + fit — the instance has no .resize()
+   networkInstance.redraw();
+   networkInstance.fit();
+   // Chart.js: instance.resize() — but Chart.js auto-resizes on
+   // container size change so usually nothing needed.
+   ```
+
+   Skip the resize call for D3 / Vega-Lite / inline SVG — they paint
+   declaratively into the SVG namespace and aren't bothered by hidden
+   parents.
+
 ### Step-through walkthrough — guided narrative
 A "Next ▶" button advances through a sequence of stages, each with its
 own caption and (optionally) a different highlighted region of the same
@@ -736,7 +766,7 @@ Common picks:
 | **Vega-Lite** | Declarative grammar of graphics — feed it a JSON spec, it draws the chart | `<script src="https://cdn.jsdelivr.net/npm/vega@5"></script><script src="https://cdn.jsdelivr.net/npm/vega-lite@5"></script><script src="https://cdn.jsdelivr.net/npm/vega-embed@6"></script>` |
 | **ECharts** | Rich interactive dashboards, advanced chart types | `<script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.5.0/echarts.min.js"></script>` |
 | **Plotly** | Scientific / 3D plots, statistical charts | `<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist@2"></script>` |
-| **vis-network** | Force-directed network / node-link graphs | `<script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.9/vis-network.min.js"></script>` |
+| **vis-network** | Force-directed network / node-link graphs | `<script src="https://cdn.jsdelivr.net/npm/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>` (the **standalone** UMD bundle — exposes `vis.Network` *and* `vis.DataSet`. The bare `vis-network.min.js` on cdnjs is the *peer* build and requires `vis-data` loaded separately, otherwise `new vis.DataSet(...)` throws `vis is not defined`.) |
 | **Tone.js / Wavesurfer** | Audio synthesis, waveform visualisation | `<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/15.0.4/Tone.js"></script>` |
 
 Anything else on those three CDNs is fair game — `apexcharts`, `d3-force`,
