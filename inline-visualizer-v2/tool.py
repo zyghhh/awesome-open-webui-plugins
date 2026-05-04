@@ -608,6 +608,13 @@ dl[data-layout="inline"] > div > dd {
 # ---------------------------------------------------------------------------
 # Theme script runs in <head> before user content so CSS vars are resolved
 # when model scripts read them at parse time.
+#
+# !! SRCDOC SAFETY !!  Do NOT write the literal tokens <!-- , --> ,
+# <![CDATA[ , ]]> , <script> or </script> ANYWHERE in this body —
+# not even inside JS comments. The iframe srcdoc's HTML5 tokenizer
+# treats them as parser state changes regardless of JS context, and
+# silently breaks the IIFE (see _assert_srcdoc_safe near the bottom
+# of this file for the runtime guard).
 THEME_DETECTION_SCRIPT = """
 <script>
 (function() {
@@ -657,6 +664,9 @@ THEME_DETECTION_SCRIPT = """
 </script>
 """
 
+# !! SRCDOC SAFETY !!  Do NOT write the literal tokens <!-- , --> ,
+# <![CDATA[ , ]]> , <script> or </script> ANYWHERE in this body —
+# not even inside JS comments. See THEME_DETECTION_SCRIPT for full rationale.
 BODY_SCRIPTS = """
 <script>
 // --- Height reporting ---
@@ -1343,7 +1353,7 @@ function _ivDownload() {
 
   // Serialize from a clone so we can relocate model-imported scripts
   // without mutating the live iframe. enqueueScript appended each
-  // imported <script> to <head> for sequenced execution during streaming
+  // imported script tags to head for sequenced execution during streaming
   // — but in a fresh standalone load, head scripts run BEFORE the body
   // is parsed, so any getElementById('chart-canvas') etc. returns null.
   // Move tagged scripts to the end of <body> so they execute after the
@@ -1429,6 +1439,9 @@ function _ivDownload() {
 # a ``typeof playDoneSound === 'function'`` guard, so omission is safe.
 # ---------------------------------------------------------------------------
 
+# !! SRCDOC SAFETY !!  Do NOT write the literal tokens <!-- , --> ,
+# <![CDATA[ , ]]> , <script> or </script> ANYWHERE in this body —
+# not even inside JS comments. See THEME_DETECTION_SCRIPT for full rationale.
 CHIME_SCRIPT = """
 // --- Happy chime ---
 // C-major arpeggio (C5 → E5 → G5) on sine oscillators with exponential
@@ -1469,6 +1482,9 @@ function playDoneSound() {
 # not intercepted.
 # ---------------------------------------------------------------------------
 
+# !! SRCDOC SAFETY !!  Do NOT write the literal tokens <!-- , --> ,
+# <![CDATA[ , ]]> , <script> or </script> ANYWHERE in this body —
+# not even inside JS comments. See THEME_DETECTION_SCRIPT for full rationale.
 STRICT_SECURITY_SCRIPT = """
 <script>
 (function() {
@@ -1528,6 +1544,11 @@ STRICT_SECURITY_SCRIPT = """
 # Requires iframe Sandbox Allow Same Origin.
 # ---------------------------------------------------------------------------
 
+# !! SRCDOC SAFETY !!  Do NOT write the literal tokens <!-- , --> ,
+# <![CDATA[ , ]]> , <script> or </script> ANYWHERE in this body —
+# not even inside JS comments. See THEME_DETECTION_SCRIPT for full rationale.
+# This is the script that broke in 2.1.0–2.1.2 when a comment cleanup
+# accidentally introduced literal <!-- and <script> inside JS comments.
 STREAMING_OBSERVER_SCRIPT = """
 <script>
 (function() {
@@ -1905,8 +1926,10 @@ STREAMING_OBSERVER_SCRIPT = """
 
       if (state === 'TEXT') {
         if (ch === 60 /* < */) {
-          // Built by concatenation: literal `<!--` / `<![CDATA[` here
-          // would flip the enclosing parser into data-escape mode.
+          // The HTML-comment / CDATA opener tokens are built via
+          // string concatenation. Embedding the raw forms in source
+          // (even inside a JS comment) puts the enclosing srcdoc
+          // parser into script-data-escape mode and breaks the IIFE.
           var CMT_OPEN = '<' + '!--';
           var CMT_CLOSE = '--' + '>';
           var CDATA_OPEN = '<' + '![CDATA[';
@@ -1918,7 +1941,9 @@ STREAMING_OBSERVER_SCRIPT = """
             continue;
           }
           if (text.substr(i, 9) === CDATA_OPEN) {
-            var ke = text.indexOf(']]>', i + 9);
+            // CDATA close — literal would put srcdoc parser into
+            // script-data-escape mode; concatenate at runtime.
+            var ke = text.indexOf(']]' + '>', i + 9);
             if (ke === -1) break;
             i = ke + 3;
             safeCut = i;
@@ -2028,28 +2053,38 @@ STREAMING_OBSERVER_SCRIPT = """
     for (var a = 0; a < incoming.attributes.length; a++) {
       attrs.push([incoming.attributes[a].name, incoming.attributes[a].value]);
     }
+    // Each link in the chain is wrapped + .catch'd so a single bad
+    // script (model wrote invalid JS, attribute name has weird chars,
+    // appendChild's synchronous parse throws, etc.) can't kill the
+    // chain and stall every script that follows.
     if (src) {
       _ivScriptChain = _ivScriptChain.then(function() {
         return new Promise(function(resolve) {
-          var el = document.createElement('script');
-          attrs.forEach(function(pair) { el.setAttribute(pair[0], pair[1]); });
-          // Tag for HTML export: _ivDownload moves these to end of <body>
-          // so they execute after the model's canvases / DOM nodes exist.
-          el.setAttribute('data-iv-imported', '1');
-          el.onload = el.onerror = function() { resolve(); };
-          document.head.appendChild(el);
+          try {
+            var el = document.createElement('script');
+            attrs.forEach(function(pair) {
+              try { el.setAttribute(pair[0], pair[1]); } catch(_){}
+            });
+            // Tag for HTML export: _ivDownload moves these to end of body
+            // so they execute after the model's canvases / DOM nodes exist.
+            el.setAttribute('data-iv-imported', '1');
+            el.onload = el.onerror = function() { resolve(); };
+            document.head.appendChild(el);
+          } catch(e) { resolve(); }
         });
-      });
+      }).catch(function() {});
     } else {
       _ivScriptChain = _ivScriptChain.then(function() {
         try {
           var el = document.createElement('script');
-          attrs.forEach(function(pair) { el.setAttribute(pair[0], pair[1]); });
+          attrs.forEach(function(pair) {
+            try { el.setAttribute(pair[0], pair[1]); } catch(_){}
+          });
           el.setAttribute('data-iv-imported', '1');
           el.textContent = code;
           document.head.appendChild(el);
-        } catch(e) { try { console.error(e); } catch(_){} }
-      });
+        } catch(e) {}
+      }).catch(function() {});
     }
   }
 
@@ -2083,6 +2118,12 @@ STREAMING_OBSERVER_SCRIPT = """
   function reconcile(existing, incoming) {
     var existCh = existing.childNodes;
     var incCh = incoming.childNodes;
+    // Source declares this element as a leaf (no children); any children
+    // in the live DOM came from user scripts that target this element by
+    // id (d3.select(...).append('svg'), new vis.Network(container, ...),
+    // ECharts/Plotly/Vega painting into their target div, etc.). Trimming
+    // them would erase the chart, so leave the leaf alone.
+    if (incCh.length === 0) return;
     var i;
     for (i = 0; i < incCh.length; i++) {
       var inc = incCh[i];
@@ -2108,15 +2149,15 @@ STREAMING_OBSERVER_SCRIPT = """
       }
       if (exist.nodeType === 1) reconcile(exist, inc);
     }
-    // Defensive trim — append-only shouldn't shrink, but just in case.
-    while (existing.childNodes.length > incCh.length) {
-      existing.removeChild(existing.lastChild);
-    }
+    // No outer trim — streaming source is append-only, so existing
+    // children beyond incCh.length are script-added (D3 SVG, vis-network
+    // canvas/SVG, ECharts canvas, etc.). Removing them erases the chart
+    // mid-render even when the script targeted a non-leaf container.
   }
 
   // withScripts=true materializes scripts (finalize path); false strips
-  // them during streaming. Regexes built via concatenation so the raw
-  // <script> token doesn't appear in our own source.
+  // them during streaming. Regex source is concatenated so the raw
+  // open / close tokens never appear literally in this file.
   var _ivOpen = '<' + 'script';
   var _ivClose = '<' + '\\/script>';
   var _ivStripPaired = new RegExp(_ivOpen + '[\\\\s\\\\S]*?' + _ivClose, 'gi');
@@ -2429,16 +2470,19 @@ STREAMING_OBSERVER_SCRIPT = """
   }
 
   function pollTick() {
-    tick(false);
-    attachInnerObserver();
+    try { tick(false); } catch(e) {}
+    try { attachInnerObserver(); } catch(e) {}
   }
 
-  tick(false);
-  attachInnerObserver();
+  // Each bootstrap step is independently guarded — any one of them
+  // failing must not prevent the polling timer from being installed.
+  // Without the timer the iframe goes silently dormant.
+  try { tick(false); } catch(e) {}
+  try { attachInnerObserver(); } catch(e) {}
   try {
     new MutationObserver(function(records) {
-      tick(_ivHasChildListMutation(records));
-      attachInnerObserver();
+      try { tick(_ivHasChildListMutation(records)); } catch(e) {}
+      try { attachInnerObserver(); } catch(e) {}
     }).observe(parent.document.body, {
       childList: true, subtree: true, characterData: true
     });
@@ -2451,6 +2495,78 @@ STREAMING_OBSERVER_SCRIPT = """
 
 # Kept for backwards compatibility in case anything references the old name
 INJECTED_SCRIPTS = BODY_SCRIPTS
+
+
+# ---------------------------------------------------------------------------
+# srcdoc safety guard
+#
+# Every constant listed in _IFRAME_EMBEDDED_SCRIPTS below is concatenated
+# into an iframe's srcdoc. Once that srcdoc is parsed by the browser's
+# HTML5 tokenizer, the script-data state machine is sensitive to the
+# following literal byte sequences appearing ANYWHERE inside a script
+# body (including inside JS comments and string literals):
+#
+#   <!--           triggers "script data escape start"
+#   -->            exits  "script data escaped"
+#   <![CDATA[      same family of escape transitions
+#   ]]>            same
+#   <script        in escaped state, triggers "script data double escape start"
+#   </script>      in double-escaped state, exits back to escaped — does
+#                  NOT terminate the outer script
+#
+# When any of these appears inside a script body — even commented out —
+# the outer script's actual `</script>` tag stops terminating the
+# script. The IIFE then either never executes or executes incompletely,
+# producing the silent failure mode we hit in 2.1.0–2.1.2 (every
+# debugging path looks normal in isolation, but tick never runs).
+#
+# Always build these tokens via string concatenation in JS — never
+# write them as literals, not even inside comments. The guard below
+# raises at module load time so the plugin refuses to import if anyone
+# ever reintroduces one.
+_FORBIDDEN_SRCDOC_LITERALS = (
+    "<!--", "-->", "<![CDATA[", "]]>",
+    "<script", "</script",
+)
+
+
+def _assert_srcdoc_safe(name: str, body: str) -> None:
+    """Refuse to load if `body` contains any HTML token that would
+    confuse the iframe srcdoc's script-data state machine.
+
+    Each script body is allowed exactly ONE legitimate `<script>` and
+    one `</script>` — the wrapping tags themselves. Anything beyond
+    that count is a reintroduction of the bug fixed in 2.1.3.
+    """
+    open_count = body.count("<script")
+    close_count = body.count("</script")
+    if open_count > 1 or close_count > 1:
+        raise RuntimeError(
+            f"Inline Visualizer: {name} contains an extra <script> or "
+            f"</script> literal (open={open_count}, close={close_count}). "
+            "These break HTML5 srcdoc parsing — build them via string "
+            "concatenation in JS instead."
+        )
+    for tok in ("<!--", "-->", "<![CDATA[", "]]>"):
+        if tok in body:
+            raise RuntimeError(
+                f"Inline Visualizer: {name} contains a literal {tok!r}. "
+                "This puts the iframe srcdoc parser into script-data-escape "
+                "mode and silently breaks the IIFE. Concatenate it in JS "
+                "instead, even inside comments."
+            )
+
+
+_IFRAME_EMBEDDED_SCRIPTS = {
+    "THEME_DETECTION_SCRIPT": THEME_DETECTION_SCRIPT,
+    "BODY_SCRIPTS": BODY_SCRIPTS,
+    "CHIME_SCRIPT": CHIME_SCRIPT,
+    "STRICT_SECURITY_SCRIPT": STRICT_SECURITY_SCRIPT,
+    "STREAMING_OBSERVER_SCRIPT": STREAMING_OBSERVER_SCRIPT,
+}
+for _name, _body in _IFRAME_EMBEDDED_SCRIPTS.items():
+    _assert_srcdoc_safe(_name, _body)
+
 
 DOWNLOAD_BUTTON = (
     '<div id="iv-dl-wrap">'
