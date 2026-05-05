@@ -110,7 +110,7 @@ The **tool** mounts the iframe wrapper, injects the design-system CSS/JS, and ta
 
 ---
 
-## 🛠️ Setup
+## Setup
 
 > [!NOTE]
 > **Prerequisite.** Works best with fast + strong models that follow protocol instructions precisely. Verified on Claude Sonnet 4.5, Claude Opus 4.7, GPT-5.4, Gemini 3.1 Pro, Qwen 3.5 27B.
