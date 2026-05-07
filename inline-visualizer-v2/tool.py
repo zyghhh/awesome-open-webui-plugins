@@ -1,7 +1,7 @@
 """
 title: Inline Visualizer v2
 author: Classic298
-version: 2.1.0
+version: 2.1.1
 required_open_webui_version: 0.9.2
 description: Renders interactive HTML/SVG visualizations inline in chat. Requires "iframe Sandbox Allow Same Origin" to be enabled in Open WebUI Settings -> Interface. For design instructions, the model should call view_skill("visualize").
 """
@@ -1062,6 +1062,7 @@ var _ivStr = {
   sq: 'Shkarko si HTML',
   // Middle Eastern
   tr: 'HTML olarak indir',
+  az: 'HTML olaraq yüklə',
   ar: 'تحميل كـ HTML',
 
   he: 'הורד כ-HTML',
@@ -1116,6 +1117,7 @@ var _ivLoadStr = {
   el: 'Απόδοση οπτικοποίησης\u2026',
   sq: 'Duke renderuar vizualizimin\u2026',
   tr: 'Görselleştirme oluşturuluyor\u2026',
+  az: 'Vizuallaşdırma hazırlanır\u2026',
   ar: 'جارٍ عرض التصور\u2026',
   he: 'מציג הדמיה\u2026',
   zh: '正在渲染可视化\u2026',
@@ -1168,6 +1170,7 @@ var _ivErrTitleStr = {
   el: 'Η ροή οπτικοποίησης δεν είναι διαθέσιμη',
   sq: 'Vizualizimi i transmetimit i padisponueshëm',
   tr: 'Akış görselleştirmesi kullanılamıyor',
+  az: 'Streaming vizualizasiyası mövcud deyil',
   ar: 'التصور المتدفق غير متاح',
   he: 'הדמיה בסטרימינג אינה זמינה',
   zh: '流式可视化不可用',
@@ -1195,7 +1198,7 @@ var _ivCopiedStr = {
   be: 'Скапіявана',
   lt: 'Nukopijuota', lv: 'Nokopēts', et: 'Kopeeritud',
   ro: 'Copiat', el: 'Αντιγράφηκε', sq: 'U kopjua',
-  tr: 'Kopyalandı', ar: 'تم النسخ', he: 'הועתק',
+  tr: 'Kopyalandı', az: 'Kopyalandı', ar: 'تم النسخ', he: 'הועתק',
   zh: '已复制', ja: 'コピーしました', ko: '복사됨',
   vi: 'Đã sao chép', th: 'คัดลอกแล้ว', id: 'Disalin', ms: 'Disalin',
   hi: 'कॉपी किया गया', bn: 'অনুলিপি করা হয়েছে',
@@ -1241,6 +1244,7 @@ var _ivDoneStr = {
   el: 'Η οπτικοποίηση είναι έτοιμη',
   sq: 'Vizualizimi gati',
   tr: 'Görselleştirme hazır',
+  az: 'Vizuallaşdırma hazırdır',
   ar: 'التصور جاهز',
   he: 'ההדמיה מוכנה',
   zh: '可视化已完成',
@@ -1291,6 +1295,7 @@ var _ivErrBodyStr = {
   el: 'Ανοίξτε Ρυθμίσεις χρήστη \u2192 Διεπαφή, κυλήστε προς τα κάτω και ενεργοποιήστε το «Allow iframe same origin» για λειτουργία ροής.',
   sq: 'Hapni Cilësimet e përdoruesit \u2192 Ndërfaqja, rrëshqitni poshtë dhe aktivizoni "Allow iframe same origin" për modalitetin e transmetimit.',
   tr: 'Kullanıcı Ayarları \u2192 Arayüz\u2019ü açın, aşağı kaydırın ve akış modu için "Allow iframe same origin" seçeneğini etkinleştirin.',
+  az: 'İstifadəçi Ayarları \u2192 İnterfeys\u2019i açın, aşağı sürüşdürün və streaming rejimi üçün "Allow iframe same origin" seçimini aktivləşdirin.',
   ar: 'افتح إعدادات المستخدم \u2190 الواجهة، مرر لأسفل وفعّل "Allow iframe same origin" لاستخدام وضع التدفق.',
   he: 'פתח הגדרות משתמש \u2190 ממשק, גלול מטה והפעל את "Allow iframe same origin" למצב סטרימינג.',
   zh: '打开 用户设置 \u2192 界面，向下滚动并启用"Allow iframe same origin"以使用流式模式。',
@@ -2291,12 +2296,16 @@ STREAMING_OBSERVER_SCRIPT = """
     finalized = true;
     // withScripts=true so the reconciler materializes script tags.
     renderSafeInto(fullText, true);
-    // Multi-shot strip — Svelte may flush chunks 1–2s after finalize
-    // fires; each run is idempotent.
+    // Multi-shot strip — Svelte may flush chunks several seconds after
+    // finalize fires (slow networks, large messages, post-render
+    // re-hydrations). Run once immediately, then every 1s for 30s; each
+    // run is idempotent and cheap. Regular cadence catches late flushes
+    // within 1s instead of waiting for the next backoff slot.
     try { stripFinalizeArtifacts(); } catch(e) {}
-    setTimeout(function() { try { stripFinalizeArtifacts(); } catch(e) {} }, 600);
-    setTimeout(function() { try { stripFinalizeArtifacts(); } catch(e) {} }, 1800);
-    setTimeout(function() { try { stripFinalizeArtifacts(); } catch(e) {} }, 4000);
+    var stripIntv = setInterval(function() {
+      try { stripFinalizeArtifacts(); } catch(e) {}
+    }, 1000);
+    setTimeout(function() { clearInterval(stripIntv); }, 30000);
     hideLoader();
     markAndAnimate(renderArea);
     // Nudge the height reporter across layout settle.

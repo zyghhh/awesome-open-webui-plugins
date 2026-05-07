@@ -128,6 +128,9 @@ The **tool** mounts the iframe wrapper, injects the design-system CSS/JS, and ta
 3. Name it exactly **`visualize`** (the tool calls `view_skill("visualize")` by this name)
 4. Paste. **Save**.
 
+> [!TIP]
+> Or drag `SKILL.md` straight into the import field on **Workspace → Skills** — Open WebUI reads the YAML frontmatter (`name: visualize`, `description: …`) and pre-fills the create form for you. Just click **Save**.
+
 ### 3. Attach to your model
 
 1. **Admin Panel → Settings → Models** → edit the model you want
