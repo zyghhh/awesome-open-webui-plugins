@@ -2293,12 +2293,14 @@ STREAMING_OBSERVER_SCRIPT = """
     renderSafeInto(fullText, true);
     // Multi-shot strip — Svelte may flush chunks several seconds after
     // finalize fires (slow networks, large messages, post-render
-    // re-hydrations); each run is idempotent. Schedule extends to 30s
-    // so late flushes still get caught.
+    // re-hydrations). Run once immediately, then every 1s for 30s; each
+    // run is idempotent and cheap. Regular cadence catches late flushes
+    // within 1s instead of waiting for the next backoff slot.
     try { stripFinalizeArtifacts(); } catch(e) {}
-    [600, 1800, 4000, 8000, 15000, 30000].forEach(function(ms) {
-      setTimeout(function() { try { stripFinalizeArtifacts(); } catch(e) {} }, ms);
-    });
+    var stripIntv = setInterval(function() {
+      try { stripFinalizeArtifacts(); } catch(e) {}
+    }, 1000);
+    setTimeout(function() { clearInterval(stripIntv); }, 30000);
     hideLoader();
     markAndAnimate(renderArea);
     // Nudge the height reporter across layout settle.
