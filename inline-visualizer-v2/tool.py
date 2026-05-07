@@ -2296,12 +2296,14 @@ STREAMING_OBSERVER_SCRIPT = """
     finalized = true;
     // withScripts=true so the reconciler materializes script tags.
     renderSafeInto(fullText, true);
-    // Multi-shot strip — Svelte may flush chunks 1–2s after finalize
-    // fires; each run is idempotent.
+    // Multi-shot strip — Svelte may flush chunks several seconds after
+    // finalize fires (slow networks, large messages, post-render
+    // re-hydrations); each run is idempotent. Schedule extends to 30s
+    // so late flushes still get caught.
     try { stripFinalizeArtifacts(); } catch(e) {}
-    setTimeout(function() { try { stripFinalizeArtifacts(); } catch(e) {} }, 600);
-    setTimeout(function() { try { stripFinalizeArtifacts(); } catch(e) {} }, 1800);
-    setTimeout(function() { try { stripFinalizeArtifacts(); } catch(e) {} }, 4000);
+    [600, 1800, 4000, 8000, 15000, 30000].forEach(function(ms) {
+      setTimeout(function() { try { stripFinalizeArtifacts(); } catch(e) {} }, ms);
+    });
     hideLoader();
     markAndAnimate(renderArea);
     // Nudge the height reporter across layout settle.
