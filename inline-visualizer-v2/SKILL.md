@@ -26,8 +26,6 @@ The raw markers + SVG source are auto-hidden from the chat — users see only th
 **Example response structure:**
 
 """
-visualize(title="Attention")
-
 I'll visualize the attention mechanism for you.
 
 @@@VIZ-START
@@ -40,7 +38,7 @@ As you can see, each query token attends to all key tokens simultaneously.
 """
 
 **Streaming rules:**
-- Use the delimiters EXACTLY @@@VIZ-START and @@@VIZ-END — case-sensitive, on their own lines. Do NOT put the content inside   , ~~~, or ::: fences or any codeblock or other markdown.
+- Use the delimiters EXACTLY @@@VIZ-START and @@@VIZ-END — case-sensitive, on their own lines. Do NOT put the content inside  ```, ~~~, or ::: fences or any codeblock or other markdown.
 - Do NOT wrap in HTML tags like <viz> or <svg data-iv> — only the text markers are detected.
 - Emit **exactly ONE** @@@VIZ-START … @@@VIZ-END pair per tool call. For multiple visualizations, call the tool multiple times.
 - Structure the content as always: <style> first → visible content → <script> last.
@@ -128,7 +126,7 @@ Default to purple for neutral or multi-purpose visualizations.
 These rules keep visuals clean, accessible, and consistent with the host UI:
 
 - **Flat design** — no gradients, drop shadows, blur, glow, or noise textures (the host UI is flat; matching it prevents visual jarring)
-- **No emoji** — use CSS shapes or SVG paths for icons (emoji render inconsistently across platforms)
+- **Prefer no emojis**, instead use CSS shapes or SVG paths for icons (emoji render inconsistently across platforms)
 - **Sentence case** — all labels and headings
 - **Round displayed numbers** — use Math.round, toLocaleString, or Intl.NumberFormat
 - **Min font size 11px** — smaller becomes unreadable on most screens
