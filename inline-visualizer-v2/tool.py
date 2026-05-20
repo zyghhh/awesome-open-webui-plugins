@@ -1,7 +1,7 @@
 """
 title: Inline Visualizer
 author: Classic298
-version: 2.1.1
+version: 2.1.2
 required_open_webui_version: 0.9.5
 description: Renders interactive HTML/SVG visualizations inline in chat. Requires "iframe Sandbox Allow Same Origin" to be enabled in Open WebUI Settings -> Interface. For design instructions, the model should call view_skill("visualize").
 """
