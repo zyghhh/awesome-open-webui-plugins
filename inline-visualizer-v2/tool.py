@@ -1,8 +1,8 @@
 """
-title: Inline Visualizer v2
+title: Inline Visualizer
 author: Classic298
 version: 2.1.1
-required_open_webui_version: 0.9.2
+required_open_webui_version: 0.9.5
 description: Renders interactive HTML/SVG visualizations inline in chat. Requires "iframe Sandbox Allow Same Origin" to be enabled in Open WebUI Settings -> Interface. For design instructions, the model should call view_skill("visualize").
 """
 
@@ -2748,26 +2748,27 @@ class Tools:
     def __init__(self):
         self.valves = self.Valves()
 
-    async def render_visualization(
+    async def visualize(
         self,
         title: str = "Visualization",
         __event_call__=None,
     ) -> tuple:
         """
-        Render an interactive HTML or SVG visualization inline in the chat.
+        What this tool does: When called, the tool emits an iFrame wrapper sandbox directly into the chat.
+        The sandbox detects everything you emit between the two @@@VIZ-START and @@@VIZ-END tags and renders it live to the user.
+        Useful for painting diagrams, dashboards, interactive mini-apps and more.
 
-        IMPORTANT: You MUST call view_skill("visualize") FIRST to load the design system
-        before calling this tool. Never generate a visualization without reading the skill
-        instructions first — they contain critical rules for colors, layout, SVG setup,
-        chart patterns, and common failure points.
-
-        **IMPORTANT:** When to use the tool:
-        Use this tool only when the user has EXPLICITLY said to visualize something.
-        ONLY use it when there is a VERY CLEAR and UNAMBIGUOUS REQUEST by the user
-        to want something visualized in the chat.
+        **VERY IMPORTANT:** WHEN TO USE THIS TOOL:
+        Use this tool ONLY when THE USER EXPLICITLY SAID TO VISUALIZE SOMETHING.
+        ONLY use it when there is a VERY CLEAR and UNAMBIGUOUS REQUEST BY THE USER TO WANT SOMETHING VISUALIZED in the chat.
         The user MUST state that they want something visualized by you.
         ONLY IF THE USER EXPLICITLY SAYS they want something visualized, use the tool.
-        Otherwise, DO NOT use the tool.
+        Otherwise, DO NOT, NEVER, use the tool. NEVER.
+
+        IMPORTANT:
+        BEFORE CALLING THIS TOOL, YOU MUST: Call view_skill("visualize") FIRST to load the design system before calling this tool.
+        Never generate a visualization without reading the skill instructions first!
+        The Skill contains critical rules for colors, layout, SVG setup, chart patterns, and common failure points.
 
         The tool mounts an empty visualization wrapper in the chat.
         Then, in your text response that follows, wrap the HTML/SVG in the TEXT DELIMITERS
@@ -2777,21 +2778,9 @@ class Tools:
             <svg viewBox="0 0 680 240">...</svg>
             @@@VIZ-END
 
-        The wrapper tails your streaming text and renders the content between the
-        markers LIVE, token-by-token, into the iframe. Users see the visualization
-        paint progressively as you generate it. The raw markers + SVG source are
-        auto-hidden from the chat, so users see only the rendered iframe.
-
-        The system automatically injects:
-        - Theme CSS variables (auto-detected light/dark mode)
-        - SVG utility classes: .t .ts .th .box .node .arr .leader
-        - Color ramp classes: .c-purple .c-teal .c-coral .c-pink .c-gray .c-blue .c-green .c-amber .c-red
-        - Base element styles (button, range, select, code, headings)
-        - Height auto-sizing script
-        - sendPrompt(text) function — sends a message to the chat (requires iframe Sandbox Allow Same Origin)
-        - openLink(url) function — opens a URL in a new tab
-        - saveState() and loadState() function
-        - copyText() function
+        The wrapper tails your streaming text and renders the content between the markers LIVE, token-by-token, into the iframe.
+        Users see the visualization paint progressively as you generate it.
+        The raw markers + SVG source are auto-hidden from the chat, so users see only the rendered iframe.
 
         :param title: Short descriptive title for the visualization.
         :return: Interactive rich embed rendered in the chat, with LLM context.
