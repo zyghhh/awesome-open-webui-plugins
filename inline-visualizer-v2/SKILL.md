@@ -602,7 +602,7 @@ This pattern is powerful because the model receives a structured summary of all 
 
 ## Interactivity by default
 
-Build dashboards, charts, graphs, interactive functions, animated sections, moving objects, explandable detail sections, cards, copyable text elements and more. If the topic allows and it makes sense for the topic, build complex and visually stunning elements.
+Build dashboards, charts, graphs, interactive functions, animated sections, moving objects, expandable detail sections, cards, copyable text elements and more. If the topic allows and it makes sense for the topic, build complex and visually stunning elements.
 
 Visualizations should feel alive and polished — not static images dumped into chat. Build interfaces that invite interaction:
 
