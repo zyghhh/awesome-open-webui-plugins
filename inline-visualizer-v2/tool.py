@@ -2766,7 +2766,8 @@ class Tools:
         Otherwise, DO NOT, NEVER, use the tool. NEVER.
 
         IMPORTANT:
-        BEFORE CALLING THIS TOOL, YOU MUST: Call view_skill("visualize") FIRST to load the design system before calling this tool.
+        BEFORE CALLING THIS TOOL, YOU MUST: Call view_skill("visualize") FIRST.
+        The visualize Skill shows you how to really use this tool. It is the necessary complementary handbook and tutorial that you HAVE to read before actually using this tool.
         Never generate a visualization without reading the skill instructions first!
         The Skill contains critical rules for colors, layout, SVG setup, chart patterns, and common failure points.
 
