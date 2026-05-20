@@ -2754,34 +2754,39 @@ class Tools:
         __event_call__=None,
     ) -> tuple:
         """
-        What this tool does: When called, the tool emits an iFrame wrapper sandbox directly into the chat.
-        The sandbox detects everything you emit between the two @@@VIZ-START and @@@VIZ-END tags and renders it live to the user.
-        Useful for painting diagrams, dashboards, interactive mini-apps and more.
-
-        **VERY IMPORTANT:** WHEN TO USE THIS TOOL:
-        Use this tool ONLY when THE USER EXPLICITLY SAID TO VISUALIZE SOMETHING.
-        ONLY use it when there is a VERY CLEAR and UNAMBIGUOUS REQUEST BY THE USER TO WANT SOMETHING VISUALIZED in the chat.
-        The user MUST state that they want something visualized by you.
-        ONLY IF THE USER EXPLICITLY SAYS they want something visualized, use the tool.
-        Otherwise, DO NOT, NEVER, use the tool. NEVER.
+        What this tool does: visualize() mounts an iframe sandbox directly in the chat.
+        After this tool is called, the assistant must stream exactly one HTML/SVG visualization fragment between the plain-text delimiters @@@VIZ-START and @@@VIZ-END.
+        The sandbox renders that fragment live for the user.
+        
+        Use this tool ONLY for EXPLICIT visualization requests.
+        Do NOT use this tool proactively. Do NOT infer that a visualization would be helpful.
+        **If the user did not explicitly ask for a visual artifact, do not call visualize().**
+        Never use visualize() for ordinary assistant output.
+        The chat you are responding in has a full Markdown, LaTeX, KaTeX and Mermaid rendering engine.
+        Call visualize() ONLY when the latest user message clearly and UNAMBIGUOUSLY, DIRECTLY, EXPLICITLY asks for a visual artifact (e.g. diagrams, charts, graphs, cashboards, illustrations, interactive explainers, etc.).
 
         IMPORTANT:
         BEFORE CALLING THIS TOOL, YOU MUST: Call view_skill("visualize") FIRST.
-        The visualize Skill shows you how to really use this tool. It is the necessary complementary handbook and tutorial that you HAVE to read before actually using this tool.
-        Never generate a visualization without reading the skill instructions first!
-        The Skill contains critical rules for colors, layout, SVG setup, chart patterns, and common failure points.
+        You MUST call view_skill("visualize") first.
+        The visualize skill contains a mandatory handbook/tutorial with important rules for rendering, layout, SVG setup, chart patterns, colors, interactivity, and common failure points.
+        Never generate a visualization without reading the skill first.
 
-        The tool mounts an empty visualization wrapper in the chat.
-        Then, in your text response that follows, wrap the HTML/SVG in the TEXT DELIMITERS
-        @@@VIZ-START / @@@VIZ-END:
+        After calling this tool:
+        In the assistant message that follows, emit exactly one visualization block:
 
-            @@@VIZ-START
-            <svg viewBox="0 0 680 240">...</svg>
-            @@@VIZ-END
+        @@@VIZ-START
+        <!-- HTML/SVG fragment only -->
+        @@@VIZ-END
 
-        The wrapper tails your streaming text and renders the content between the markers LIVE, token-by-token, into the iframe.
-        Users see the visualization paint progressively as you generate it.
-        The raw markers + SVG source are auto-hidden from the chat, so users see only the rendered iframe.
+        Hard output rules:
+        - Use the delimiters exactly: @@@VIZ-START and @@@VIZ-END.
+        - Put each delimiter on its own line.
+        - Emit exactly one @@@VIZ-START / @@@VIZ-END pair per tool call.
+        - Do not wrap the visualization in Markdown code fences.
+        - Do not use ```html, ```svg, ~~~, :::, or any other fenced block.
+        - Emit a fragment only: no <!DOCTYPE>, no <html>, no <head>, no <body>.
+        - Structure the fragment as: <style> first, visible content next, <script> last.
+        - Do not describe the HTML/SVG source to the user. Describe what the visualization shows.
 
         :param title: Short descriptive title for the visualization.
         :return: Interactive rich embed rendered in the chat, with LLM context.
