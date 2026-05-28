@@ -3,7 +3,7 @@ title: Inline Visualizer Template
 author: Derek
 version: 0.4.0
 license: MIT
-description: Fast template-based visualizations for Open WebUI. Three self-describing functions — render_data_detail, render_chart, render_dashboard — each with flat, typed parameters. Chart.js rendering, dark-mode-safe, PNG export.
+description: Fast template-based visualizations for Open WebUI. Four self-describing functions — render_data_detail, render_chart, render_dashboard, render_analysis_dashboard — each with flat, typed parameters. Chart.js rendering, dark-mode-safe, PNG export.
 required_open_webui_version: 0.9.5
 
 tool_instructions: |
@@ -15,6 +15,16 @@ tool_instructions: |
   - Arrays and objects must be native JSON, not strings.
   - Numbers must be numbers, not strings.
   - ALL parameters are direct values — no nested "data" wrapper.
+
+  Data detail first is mandatory:
+  - MUST call render_data_detail first before any chart or dashboard visualization.
+  - For every answer that includes visualization, first show the source rows with render_data_detail.
+  - Then call at most one of render_chart, render_dashboard, or render_analysis_dashboard.
+  - You must never call render_chart, render_dashboard, or render_analysis_dashboard before render_data_detail.
+  - Data detail first does not imply analysis dashboard. Choose the second visualization by user intent.
+  - For a simple trend, bar, pie, or table request, use render_chart after render_data_detail.
+  - After render_data_detail, convert the same rows into the render_chart series parameter.
+    Do not omit series when calling render_chart.
 
   --- render_data_detail: SQL + explanation + data table preview ---
   {
@@ -66,6 +76,7 @@ tool_instructions: |
   Pie only uses the first y_column.
 
   series: list of objects (required). Each must have one x-axis key (string) plus one or more numeric value columns.
+  rows: accepted as a compatibility alias for series when reusing render_data_detail rows.
   y_columns: which columns to plot on y-axis (optional). Auto-detected if omitted.
   chart_type: "line" | "bar" | "pie" | "table" (optional, defaults to "line").
   title: shown in the toolbar (optional, defaults to "Chart").
@@ -78,9 +89,10 @@ tool_instructions: |
       {"label": "Avg Latency", "value": "184ms", "delta": "-8.0%"}
     ],
     "series": [
-      {"label": "Jan", "value": 120},
-      {"label": "Feb", "value": 148}
+      {"month": "Jan", "revenue": 120, "users": 500},
+      {"month": "Feb", "revenue": 148, "users": 600}
     ],
+    "y_columns": ["revenue", "users"],
     "chart_title": "Monthly Trend",
     "chart_type": "line",
     "title": "Q1 Overview"
@@ -89,10 +101,50 @@ tool_instructions: |
     label: metric name (string).
     value: display value (string or number, e.g. "$3.87M" or 48200).
     delta: change indicator (string, optional, e.g. "+12.4%" or "-8.0%").
-  series: optional trend chart data (list of {label, value}).
+  series: optional trend chart data. Supports single-series (backward compat: list of {label, value})
+    and multi-series (list of objects with x-axis key + multiple numeric columns).
+  y_columns: which numeric columns to plot for multi-series (optional, auto-detected if omitted).
   chart_title: label for the trend chart (optional).
   chart_type: "line" | "bar" | "pie" | "table" for the trend chart (optional, defaults to "line").
   title: shown in the toolbar (optional, defaults to "Dashboard").
+
+  Multi-series dashboard renders grouped bars (bar) or multiple lines with legend (line).
+  Pie only uses the first y_column.
+
+  --- render_analysis_dashboard: comprehensive analysis dashboard ---
+  Use this only when the user explicitly asks for comprehensive analysis,
+  monitoring dashboards, diagnostics, multi-angle analysis, or a multi-module
+  page. Do not use it for simple trend/bar/pie/table requests. It does NOT
+  replace render_data_detail. The render_data_detail call must already have
+  shown source rows before this function is used.
+
+  {
+    "title": "Service Traffic Analysis",
+    "subtitle": "24-hour monitor overview",
+    "hero_chart": {
+      "title": "Traffic Trend",
+      "chart_type": "line",
+      "series": [
+        {"time": "00:00", "requests": 120, "errors": 3},
+        {"time": "01:00", "requests": 148, "errors": 5}
+      ],
+      "y_columns": ["requests", "errors"]
+    },
+    "rankings": {
+      "title": "Peak Services",
+      "items": [
+        {"label": "api-a", "value": 5677, "unit": "rpm"},
+        {"label": "api-b", "value": 4805, "unit": "rpm"}
+      ]
+    },
+    "small_charts": [],
+    "summary_cards": [{"label": "Peak", "value": "5,677 rpm", "delta": "+8%"}]
+  }
+
+  hero_chart: required main chart object. Same series/y_columns rules as render_chart.
+  rankings: optional top-N/ranking object; use for peaks, contribution, top regions/items.
+  small_charts: optional list of 1-2 compact chart objects.
+  summary_cards: optional bottom KPI cards.
 
   After calling any of these functions, only describe what the visualization shows in natural language. Do NOT output HTML, CSS, SVG, or JavaScript.
 """
@@ -170,6 +222,75 @@ def _coerce_str_list(value: Any) -> List[str]:
     if isinstance(v, list):
         return [str(x) for x in v]
     return []
+
+
+def _normalize_series_block(block: Any, *, name: str) -> Any:
+    """Normalize chart-like blocks shared by chart, dashboard, and analysis dashboard."""
+    block = _coerce_dict(block)
+    if not isinstance(block, dict):
+        return f"Error: '{name}' must be an object with title, chart_type, and series."
+
+    coerced_series = _coerce_list(block.get("series"))
+    if not isinstance(coerced_series, list) or len(coerced_series) == 0:
+        return (
+            f"Error: '{name}.series' is required and must be a non-empty list. "
+            'Example: {"time": "00:00", "requests": 120}'
+        )
+
+    clean: List[Dict[str, Any]] = []
+    for i, item in enumerate(coerced_series):
+        item = _coerce_dict(item)
+        if not isinstance(item, dict):
+            return f"Error: {name}.series[{i}] must be an object."
+        clean.append(dict(item))
+
+    coerced_y = _coerce_list(block.get("y_columns")) if block.get("y_columns") is not None else None
+    if coerced_y and isinstance(coerced_y, list) and len(coerced_y) > 0:
+        y_cols = [str(c) for c in coerced_y]
+    elif all("value" in item for item in clean):
+        y_cols = ["value"]
+    else:
+        first = clean[0]
+        y_cols = [
+            k for k in first.keys()
+            if isinstance(first[k], (int, float)) and not isinstance(first[k], bool)
+        ]
+        if not y_cols:
+            return (
+                f"Error: no numeric value columns found in '{name}.series'. "
+                f"Got keys: {list(first.keys())}."
+            )
+
+    for i, item in enumerate(clean):
+        for col in y_cols:
+            if col not in item:
+                return f"Error: {name}.series[{i}] missing column '{col}'."
+
+    x_col = str(block.get("x_column") or "")
+    if not x_col:
+        for key in clean[0].keys():
+            if key not in y_cols:
+                x_col = key
+                break
+    if not x_col:
+        return f"Error: '{name}' must include one non-y column for the x-axis."
+
+    for i, item in enumerate(clean):
+        if x_col not in item:
+            return f"Error: {name}.series[{i}] missing x-axis column '{x_col}'."
+        item[x_col] = str(item[x_col])
+
+    chart_type = str(block.get("chart_type") or block.get("chartType") or "line")
+    if chart_type not in ("line", "bar", "pie", "table"):
+        return f"Error: '{name}.chart_type' must be line, bar, pie, or table."
+
+    return {
+        "title": str(block.get("title") or "Chart"),
+        "chartType": chart_type,
+        "series": clean,
+        "y_columns": y_cols,
+        "x_column": x_col,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -270,6 +391,30 @@ body { padding: 4px; }
   flex-wrap: wrap;
   justify-content: flex-end;
 }
+.png-menu-wrap { position: relative; display: inline-flex; }
+.png-menu {
+  display: none;
+  position: absolute;
+  right: 0;
+  top: 30px;
+  min-width: 128px;
+  padding: 4px;
+  border: 0.5px solid var(--color-border-tertiary);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-primary);
+  box-shadow: 0 8px 20px rgba(0,0,0,0.12);
+  z-index: 20;
+}
+.png-menu.show { display: block; }
+.png-menu button {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  justify-content: flex-start;
+  text-align: left;
+  height: 26px;
+}
+.png-menu button:hover { background: var(--color-bg-tertiary); }
 button, select {
   height: 26px;
   border: 0.5px solid var(--color-border-tertiary);
@@ -463,6 +608,60 @@ select { max-width: 118px; }
   height: 260px;
 }
 
+/* --- Analysis dashboard --- */
+.analysis-dashboard { padding: 12px 14px; background: var(--color-bg-secondary); }
+.analysis-head { text-align: center; margin: 0 0 10px; }
+.analysis-title { font-size: 15px; font-weight: 700; color: var(--color-text-primary); }
+.analysis-subtitle { font-size: 11px; color: var(--color-text-secondary); margin-top: 2px; }
+.analysis-panel {
+  background: var(--color-bg-primary);
+  border: 0.5px solid var(--color-border-tertiary);
+  border-radius: var(--radius-lg);
+  padding: 10px;
+  margin-bottom: 8px;
+}
+.analysis-panel-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  border-left: 3px solid var(--accent);
+  padding-left: 6px;
+  margin-bottom: 8px;
+}
+.analysis-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.analysis-chart { position: relative; height: 240px; }
+.analysis-small-chart { position: relative; height: 120px; }
+.ranking-row {
+  display: grid;
+  grid-template-columns: minmax(54px, 120px) 1fr minmax(62px, auto);
+  gap: 8px;
+  align-items: center;
+  margin: 6px 0;
+  font-size: 12px;
+}
+.ranking-label { color: var(--color-text-primary); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ranking-track { height: 10px; border-radius: 999px; background: var(--color-bg-tertiary); overflow: hidden; }
+.ranking-bar { height: 100%; border-radius: 999px; background: var(--accent); }
+.ranking-value { color: var(--color-text-primary); font-weight: 600; text-align: right; white-space: nowrap; }
+.analysis-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 6px;
+}
+.analysis-card {
+  background: var(--color-bg-primary);
+  border: 0.5px solid var(--color-border-tertiary);
+  border-radius: var(--radius-md);
+  padding: 8px;
+  text-align: center;
+}
+.analysis-card-label { font-size: 11px; color: var(--color-text-secondary); }
+.analysis-card-value { font-size: 15px; font-weight: 700; color: var(--color-text-primary); margin-top: 2px; }
+
 /* --- Table template --- */
 .data-table-wrap { padding: 10px 14px; }
 .data-table-wrap table {
@@ -588,7 +787,10 @@ def _build_html(
           <option value="pie">Pie</option>
           <option value="table">Table</option>
         </select>
-        <button id="pngBtn" title="Export PNG">PNG</button>
+        <div class="png-menu-wrap">
+          <button id="pngBtn" title="Export PNG">PNG</button>
+          <div id="pngMenu" class="png-menu"></div>
+        </div>
         <button id="csvBtn" title="Export CSV" style="display:none">CSV</button>
       </div>
     </div>
@@ -600,6 +802,7 @@ def _build_html(
 <script id="payload" type="application/json">{payload_json}</script>
 <script id="serverStats" type="application/json">__SERVER_STATS__</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script>
 (function() {{
   'use strict';
@@ -660,8 +863,8 @@ def _build_html(
       var h = '';
       visibleRows.forEach(function(row) {{
         h += '<tr>';
-        st.columns.forEach(function(c) {{
-          var val = typeof row === 'object' ? (row[c] != null ? row[c] : '') : row;
+        st.columns.forEach(function(c, ci) {{
+          var val = cellValue(row, c, ci);
           var maxLen = key === 'dd' ? 32 : 40;
           h += '<td>' + esc(shortLabel(String(val), maxLen)) + '</td>';
         }});
@@ -698,6 +901,66 @@ def _build_html(
 
   function getCssVar(name) {{
     return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }}
+
+  // -------------------------------------------------------------------
+  // Legend — unified configuration for all chart types
+  // -------------------------------------------------------------------
+
+  function buildLegendConfig(chartType, context) {{
+    var textColor = getCssVar('--color-text-secondary');
+    var base = {{
+      labels: {{
+        color: textColor,
+        font: {{ size: 11 }},
+        padding: 10,
+        usePointStyle: true,
+        pointStyleWidth: 8,
+        boxWidth: 8,
+        boxHeight: 8,
+      }}
+    }};
+
+    if (context === 'pie') {{
+      base.position = 'right';
+      base.labels.padding = 14;
+      base.labels.pointStyle = 'rectRounded';
+    }} else if (context === 'multi') {{
+      base.position = 'top';
+      if (chartType === 'bar') {{
+        base.labels.pointStyle = 'rectRounded';
+      }} else {{
+        base.labels.pointStyle = 'circle';
+      }}
+    }} else if (context === 'dashboard-pie') {{
+      base.position = 'bottom';
+      base.labels.pointStyle = 'rectRounded';
+    }}
+
+    return base;
+  }}
+
+  function buildChartDatasets(series, yCols, isMulti, chartType, pointRadius, pointHoverRadius, bgColor) {{
+    return yCols.map(function(col, i) {{
+      var color = COLORS[i % COLORS.length];
+      return {{
+        label: isMulti ? col : undefined,
+        data: series.map(function(d) {{ return num(d[col]); }}),
+        borderColor: color,
+        backgroundColor: chartType === 'bar' ? (isMulti ? color : series.map(function(_, i) {{ return COLORS[i % COLORS.length]; }})) : color + '20',
+        fill: chartType === 'line',
+        tension: 0.3,
+        pointRadius: chartType === 'line' ? pointRadius : undefined,
+        pointBackgroundColor: chartType === 'line' ? color : undefined,
+        pointBorderColor: chartType === 'line' ? bgColor : undefined,
+        pointBorderWidth: chartType === 'line' ? 2 : undefined,
+        pointHoverRadius: chartType === 'line' ? pointHoverRadius : undefined,
+        borderRadius: chartType === 'bar' ? 4 : undefined,
+        borderSkipped: chartType === 'bar' ? false : undefined,
+        borderWidth: chartType === 'pie' ? 2 : undefined,
+        hoverBorderWidth: chartType === 'pie' ? 3 : undefined
+      }};
+    }});
   }}
 
   // -------------------------------------------------------------------
@@ -818,6 +1081,14 @@ def _build_html(
     return s.length > maxLen ? s.slice(0, maxLen - 1) + '\u2026' : s;
   }}
 
+  function cellValue(row, column, index) {{
+    if (row == null || typeof row !== 'object') return row;
+    if (row[column] != null) return row[column];
+    var keys = Object.keys(row);
+    var fallbackKey = keys[index];
+    return fallbackKey != null && row[fallbackKey] != null ? row[fallbackKey] : '';
+  }}
+
   function deltaClass(s) {{
     s = String(s || '');
     if (s.charAt(0) === '+' || s.indexOf('up') === 0 || s.indexOf('incr') === 0) return 'positive';
@@ -852,8 +1123,8 @@ def _build_html(
     html += '</tr></thead><tbody id="dd-body">';
     rows.slice(0, end).forEach(function(row) {{
       html += '<tr>';
-      columns.forEach(function(c) {{
-        var val = typeof row === 'object' ? (row[c] != null ? row[c] : '') : row;
+      columns.forEach(function(c, ci) {{
+        var val = cellValue(row, c, ci);
         html += '<td>' + esc(shortLabel(String(val), 32)) + '</td>';
       }});
       html += '</tr>';
@@ -892,29 +1163,6 @@ def _build_html(
     var xCol = data.x_column || 'label';
     var labels = series.map(function(d) {{ return String(d[xCol]); }});
 
-    // Build datasets — one per y_column
-    var datasets = yCols.map(function(col, i) {{
-      var color = COLORS[i % COLORS.length];
-      var ds = {{
-        label: isMulti ? col : undefined,
-        data: series.map(function(d) {{ return num(d[col]); }}),
-        borderColor: color,
-        backgroundColor: chartType === 'bar' ? color : color + '20',
-        fill: chartType === 'line',
-        tension: 0.3,
-        pointRadius: chartType === 'line' ? 4 : undefined,
-        pointBackgroundColor: chartType === 'line' ? color : undefined,
-        pointBorderColor: chartType === 'line' ? getCssVar('--color-bg-primary') : undefined,
-        pointBorderWidth: chartType === 'line' ? 2 : undefined,
-        pointHoverRadius: chartType === 'line' ? 6 : undefined,
-        borderRadius: chartType === 'bar' ? 4 : undefined,
-        borderSkipped: chartType === 'bar' ? false : undefined,
-        borderWidth: chartType === 'pie' ? 2 : undefined,
-        hoverBorderWidth: chartType === 'pie' ? 3 : undefined
-      }};
-      return ds;
-    }});
-
     var extraH = (isMulti && chartType !== 'pie') ? 24 : 0;
     var h = chartType === 'pie'
       ? Math.min(440, Math.max(260, 200 + series.length * 14))
@@ -924,6 +1172,7 @@ def _build_html(
     var textColor = getCssVar('--color-text-secondary');
     var gridColor = getCssVar('--color-border-tertiary');
     var bgColor = getCssVar('--color-bg-primary');
+    var datasets = buildChartDatasets(series, yCols, isMulti, chartType, 4, 6, bgColor);
 
     if (chartType === 'pie') {{
       // Pie only uses first y_column (single ring)
@@ -944,10 +1193,7 @@ def _build_html(
           maintainAspectRatio: false,
           cutout: '60%',
           plugins: {{
-            legend: {{
-              position: 'right',
-              labels: {{ color: textColor, font: {{size:12}}, padding: 16, usePointStyle: true }}
-            }},
+            legend: buildLegendConfig('pie', 'pie'),
             tooltip: {{ backgroundColor: getCssVar('--color-bg-secondary'), titleColor: textColor, bodyColor: textColor, borderColor: gridColor, borderWidth: 0.5 }}
           }}
         }}
@@ -960,7 +1206,7 @@ def _build_html(
           responsive: true,
           maintainAspectRatio: false,
           plugins: {{
-            legend: {{ display: isMulti, position: 'top', labels: {{ color: textColor, font: {{size:11}}, usePointStyle: true, padding: 12 }} }},
+            legend: isMulti ? buildLegendConfig('bar', 'multi') : {{ display: false }},
             tooltip: {{ backgroundColor: getCssVar('--color-bg-secondary'), titleColor: textColor, bodyColor: textColor, borderColor: gridColor, borderWidth: 0.5 }}
           }},
           scales: {{
@@ -978,7 +1224,7 @@ def _build_html(
           maintainAspectRatio: false,
           interaction: {{ intersect: false, mode: 'index' }},
           plugins: {{
-            legend: {{ display: isMulti, position: 'top', labels: {{ color: textColor, font: {{size:11}}, usePointStyle: true, padding: 12 }} }},
+            legend: isMulti ? buildLegendConfig('line', 'multi') : {{ display: false }},
             tooltip: {{ backgroundColor: getCssVar('--color-bg-secondary'), titleColor: textColor, bodyColor: textColor, borderColor: gridColor, borderWidth: 0.5 }}
           }},
           scales: {{
@@ -1011,8 +1257,8 @@ def _build_html(
     html += '</tr></thead><tbody id="ct-body">';
     rows.slice(0, end).forEach(function(row) {{
       html += '<tr>';
-      columns.forEach(function(c) {{
-        var val = typeof row === 'object' ? (row[c] != null ? row[c] : '') : row;
+      columns.forEach(function(c, ci) {{
+        var val = cellValue(row, c, ci);
         html += '<td>' + esc(shortLabel(String(val), 40)) + '</td>';
       }});
       html += '</tr>';
@@ -1023,14 +1269,11 @@ def _build_html(
     stage.innerHTML = html;
   }}
 
-  function renderDashboardTable(series) {{
-    var columns = ['label', 'value'];
-    var rows = series.map(function(row) {{
-      return {{
-        label: row && row.label != null ? row.label : '',
-        value: row && row.value != null ? row.value : ''
-      }};
-    }});
+  function renderDashboardTable(series, xCol, yCols) {{
+    xCol = xCol || 'label';
+    yCols = yCols || ['value'];
+    var columns = [xCol].concat(yCols);
+    var rows = series;
     var pageSize = 10;
     storePageData('dash', columns, rows, pageSize);
     var end = Math.min(pageSize, rows.length);
@@ -1039,8 +1282,8 @@ def _build_html(
     html += '</tr></thead><tbody id="dash-body">';
     rows.slice(0, end).forEach(function(row) {{
       html += '<tr>';
-      columns.forEach(function(c) {{
-        html += '<td>' + esc(shortLabel(String(row[c]), 40)) + '</td>';
+      columns.forEach(function(c, ci) {{
+        html += '<td>' + esc(shortLabel(String(cellValue(row, c, ci)), 40)) + '</td>';
       }});
       html += '</tr>';
     }});
@@ -1060,6 +1303,8 @@ def _build_html(
     var metrics = data.metrics;
     var chartTitle = data.chartTitle || 'Trend';
     var series = data.series;
+    var dashXCol = data.x_column || 'label';
+    var dashYCols = data.y_columns || ['value'];
 
     var html = '<div class="dashboard">';
     html += '<div class="metrics-strip">';
@@ -1076,11 +1321,13 @@ def _build_html(
 
     if (series && Array.isArray(series) && series.length > 0) {{
       if (chartType === 'table') {{
-        html += renderDashboardTable(series);
+        html += renderDashboardTable(series, dashXCol, dashYCols);
       }} else {{
+        var dashMulti = dashYCols.length > 1;
+        var extraH = (dashMulti && chartType !== 'pie') ? 24 : 0;
         var dashH = chartType === 'pie'
           ? Math.min(380, Math.max(220, 180 + series.length * 12))
-          : Math.min(360, Math.max(200, 180 + series.length * 14));
+          : Math.min(360, Math.max(200, 180 + series.length * 14 + extraH));
         html += '<div style="position:relative; height:' + dashH + 'px;"><canvas id="dashCanvas"></canvas></div>';
       }}
     }}
@@ -1089,44 +1336,164 @@ def _build_html(
 
     if (series && Array.isArray(series) && series.length > 0) {{
       if (chartType === 'table') return;
-      var labels = series.map(function(d) {{ return String(d.label); }});
-      var values = series.map(function(d) {{ return num(d.value); }});
+      var labels = series.map(function(d) {{ return String(d[dashXCol]); }});
       var ctx = document.getElementById('dashCanvas').getContext('2d');
       var textColor = getCssVar('--color-text-secondary');
       var gridColor = getCssVar('--color-border-tertiary');
       var bgColor = getCssVar('--color-bg-primary');
 
+      var datasets = buildChartDatasets(series, dashYCols, dashMulti, chartType, 3, 5, bgColor);
+
       if (chartType === 'pie') {{
         currentChart = new Chart(ctx, {{
           type: 'doughnut',
-          data: {{ labels: labels, datasets: [{{ data: values, backgroundColor: COLORS, borderColor: bgColor, borderWidth: 2 }}] }},
+          data: {{ labels: labels, datasets: [{{ data: series.map(function(d){{return num(d[dashYCols[0]]);}}), backgroundColor: COLORS, borderColor: bgColor, borderWidth: 2, hoverBorderWidth: 3 }}] }},
           options: {{
             responsive: true, maintainAspectRatio: false, cutout: '60%',
-            plugins: {{ legend: {{ position: 'bottom', labels: {{ color: textColor, font: {{size:11}}, usePointStyle: true }} }} }}
+            plugins: {{
+              legend: buildLegendConfig('pie', 'dashboard-pie'),
+              tooltip: {{ backgroundColor: getCssVar('--color-bg-secondary'), titleColor: textColor, bodyColor: textColor, borderColor: gridColor, borderWidth: 0.5 }}
+            }}
           }}
         }});
       }} else if (chartType === 'bar') {{
         currentChart = new Chart(ctx, {{
           type: 'bar',
-          data: {{ labels: labels, datasets: [{{ data: values, backgroundColor: series.map(function(_,i){{return COLORS[i%COLORS.length];}}), borderRadius: 4, borderSkipped: false }}] }},
+          data: {{ labels: labels, datasets: datasets }},
           options: {{
             responsive: true, maintainAspectRatio: false,
-            plugins: {{ legend: {{ display: false }} }},
+            plugins: {{
+              legend: dashMulti ? buildLegendConfig('bar', 'multi') : {{ display: false }},
+              tooltip: {{ backgroundColor: getCssVar('--color-bg-secondary'), titleColor: textColor, bodyColor: textColor, borderColor: gridColor, borderWidth: 0.5 }}
+            }},
             scales: {{ x: {{ grid: {{display:false}}, ticks: {{color:textColor,font:{{size:11}}}}, border: {{color:gridColor}} }}, y: {{ grid: {{color:gridColor}}, ticks: {{color:textColor,font:{{size:11}}}}, border: {{display:false}} }} }}
           }}
         }});
       }} else {{
         currentChart = new Chart(ctx, {{
           type: 'line',
-          data: {{ labels: labels, datasets: [{{ data: values, borderColor: COLORS[0], backgroundColor: COLORS[0]+'20', fill: true, tension: 0.3, pointRadius: 3, pointBackgroundColor: COLORS[0] }}] }},
+          data: {{ labels: labels, datasets: datasets }},
           options: {{
             responsive: true, maintainAspectRatio: false,
-            plugins: {{ legend: {{ display: false }} }},
+            interaction: {{ intersect: false, mode: 'index' }},
+            plugins: {{
+              legend: dashMulti ? buildLegendConfig('line', 'multi') : {{ display: false }},
+              tooltip: {{ backgroundColor: getCssVar('--color-bg-secondary'), titleColor: textColor, bodyColor: textColor, borderColor: gridColor, borderWidth: 0.5 }}
+            }},
             scales: {{ x: {{ grid: {{display:false}}, ticks: {{color:textColor,font:{{size:11}},maxRotation:45}}, border: {{color:gridColor}} }}, y: {{ grid: {{color:gridColor}}, ticks: {{color:textColor,font:{{size:11}}}}, border: {{display:false}} }} }}
           }}
         }});
       }}
     }}
+  }}
+
+  function renderAnalysisRankings(rankings) {{
+    var items = rankings.items || [];
+    var maxValue = 0;
+    items.forEach(function(item) {{
+      maxValue = Math.max(maxValue, Math.abs(num(item.value)));
+    }});
+    if (!maxValue) maxValue = 1;
+    var html = '<div class="analysis-panel"><div class="analysis-panel-title">' + esc(rankings.title || 'Ranking') + '</div>';
+    items.slice(0, 8).forEach(function(item, i) {{
+      var value = num(item.value);
+      var pct = Math.max(2, Math.min(100, Math.abs(value) / maxValue * 100));
+      var color = COLORS[i % COLORS.length];
+      html += '<div class="ranking-row">';
+      html += '<div class="ranking-label">' + esc(item.label) + '</div>';
+      html += '<div class="ranking-track"><div class="ranking-bar" style="width:' + pct.toFixed(1) + '%;background:' + color + '"></div></div>';
+      html += '<div class="ranking-value">' + esc(item.value) + (item.unit ? ' ' + esc(item.unit) : '') + '</div>';
+      html += '</div>';
+    }});
+    html += '</div>';
+    return html;
+  }}
+
+  function drawAnalysisChart(canvasId, block, compact) {{
+    var chartType = block.chartType || block.chart_type || 'line';
+    var series = block.series || [];
+    var yCols = block.y_columns || ['value'];
+    var isMulti = yCols.length > 1;
+    var xCol = block.x_column || 'label';
+    var labels = series.map(function(d) {{ return String(d[xCol]); }});
+    var ctx = document.getElementById(canvasId).getContext('2d');
+    var textColor = getCssVar('--color-text-secondary');
+    var gridColor = getCssVar('--color-border-tertiary');
+    var bgColor = getCssVar('--color-bg-primary');
+    var datasets = buildChartDatasets(series, yCols, isMulti, chartType, compact ? 2 : 3, compact ? 4 : 5, bgColor);
+
+    if (chartType === 'pie') {{
+      new Chart(ctx, {{
+        type: 'doughnut',
+        data: {{ labels: labels, datasets: [{{ data: series.map(function(d) {{ return num(d[yCols[0]]); }}), backgroundColor: COLORS, borderColor: bgColor, borderWidth: 2 }}] }},
+        options: {{ responsive: true, maintainAspectRatio: false, cutout: '58%', plugins: {{ legend: buildLegendConfig('pie', compact ? 'dashboard-pie' : 'pie') }} }}
+      }});
+      return;
+    }}
+
+    new Chart(ctx, {{
+      type: chartType === 'bar' ? 'bar' : 'line',
+      data: {{ labels: labels, datasets: datasets }},
+      options: {{
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: {{ intersect: false, mode: 'index' }},
+        plugins: {{
+          legend: isMulti ? buildLegendConfig(chartType, 'multi') : {{ display: false }},
+          tooltip: {{ backgroundColor: getCssVar('--color-bg-secondary'), titleColor: textColor, bodyColor: textColor, borderColor: gridColor, borderWidth: 0.5 }}
+        }},
+        scales: {{
+          x: {{ grid: {{ display: false }}, ticks: {{ color: textColor, font: {{ size: compact ? 10 : 11 }}, maxRotation: 45 }}, border: {{ color: gridColor }} }},
+          y: {{ grid: {{ color: gridColor }}, ticks: {{ color: textColor, font: {{ size: compact ? 10 : 11 }} }}, border: {{ display: false }} }}
+        }}
+      }}
+    }});
+  }}
+
+  function renderAnalysisDashboard(data) {{
+    var html = '<div class="analysis-dashboard">';
+    html += '<div class="analysis-head"><div class="analysis-title">' + esc(data.title || 'Analysis Dashboard') + '</div>';
+    if (data.subtitle) html += '<div class="analysis-subtitle">' + esc(data.subtitle) + '</div>';
+    html += '</div>';
+
+    if (data.heroChart) {{
+      html += '<div class="analysis-panel"><div class="analysis-panel-title">' + esc(data.heroChart.title || 'Trend') + '</div>';
+      html += '<div class="analysis-chart"><canvas id="analysisHero"></canvas></div></div>';
+    }}
+
+    if (data.rankings) {{
+      html += renderAnalysisRankings(data.rankings);
+    }}
+
+    var smallCharts = data.smallCharts || [];
+    if (smallCharts.length) {{
+      html += '<div class="analysis-grid">';
+      smallCharts.slice(0, 2).forEach(function(block, i) {{
+        html += '<div class="analysis-panel"><div class="analysis-panel-title">' + esc(block.title || 'Chart') + '</div>';
+        html += '<div class="analysis-small-chart"><canvas id="analysisSmall' + i + '"></canvas></div></div>';
+      }});
+      html += '</div>';
+    }}
+
+    var cards = data.summaryCards || [];
+    if (cards.length) {{
+      html += '<div class="analysis-cards">';
+      cards.forEach(function(card) {{
+        html += '<div class="analysis-card"><div class="analysis-card-label">' + esc(card.label) + '</div>';
+        html += '<div class="analysis-card-value">' + esc(card.value) + '</div>';
+        if (card.delta) html += '<div class="metric-delta ' + deltaClass(card.delta) + '">' + esc(card.delta) + '</div>';
+        html += '</div>';
+      }});
+      html += '</div>';
+    }}
+
+    html += '</div>';
+    stage.innerHTML = html;
+
+    if (data.heroChart) drawAnalysisChart('analysisHero', data.heroChart, false);
+    smallCharts.slice(0, 2).forEach(function(block, i) {{
+      drawAnalysisChart('analysisSmall' + i, block, true);
+    }});
   }}
 
   // -------------------------------------------------------------------
@@ -1142,6 +1509,8 @@ def _build_html(
 
     if (tpl === 'data_detail') {{
       renderDataDetail(payload.data);
+    }} else if (tpl === 'analysis_dashboard') {{
+      renderAnalysisDashboard(payload.data);
     }} else if (tpl === 'dashboard') {{
       renderDashboard(payload.data, chartType);
     }} else {{
@@ -1164,6 +1533,7 @@ def _build_html(
     }} else {{
       stats.innerHTML = '';
     }}
+    setupPngMenu();
     reportHeight();
   }}
 
@@ -1184,6 +1554,51 @@ def _build_html(
     toast._t = setTimeout(function() {{ el.classList.remove('show'); }}, 1600);
   }}
 
+  function filename(suffix) {{
+    var base = (payload.title || 'visualization').replace(/[<>:"\\\\/|?*]+/g, '-');
+    return base + (suffix ? '-' + suffix : '') + '.png';
+  }}
+
+  function downloadBlob(blob, name) {{
+    if (!blob) {{ toast('PNG export failed'); return; }}
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    a.click();
+    setTimeout(function() {{ URL.revokeObjectURL(url); }}, 1200);
+    toast('PNG exported');
+  }}
+
+  function exportCanvasPng(canvasId, suffix) {{
+    var canvas = document.getElementById(canvasId);
+    if (!canvas) {{
+      toast('No chart to export');
+      return;
+    }}
+    canvas.toBlob(function(blob) {{
+      downloadBlob(blob, filename(suffix));
+    }}, 'image/png');
+  }}
+
+  function exportWholeDashboardPng() {{
+    var target = document.querySelector('#stage .analysis-dashboard') || document.querySelector('#stage');
+    if (!target || typeof html2canvas !== 'function') {{
+      exportPng();
+      return;
+    }}
+    html2canvas(target, {{
+      backgroundColor: getCssVar('--color-bg-secondary') || null,
+      scale: Math.min(2, window.devicePixelRatio || 1)
+    }}).then(function(canvas) {{
+      canvas.toBlob(function(blob) {{
+        downloadBlob(blob, filename('dashboard'));
+      }}, 'image/png');
+    }}).catch(function() {{
+      toast('Dashboard PNG export failed');
+    }});
+  }}
+
   function exportPng() {{
     var canvas = document.querySelector('#stage canvas');
     if (!canvas) {{
@@ -1191,15 +1606,43 @@ def _build_html(
       return;
     }}
     canvas.toBlob(function(blob) {{
-      if (!blob) {{ toast('PNG export failed'); return; }}
-      var url = URL.createObjectURL(blob);
-      var a = document.createElement('a');
-      a.href = url;
-      a.download = (payload.title || 'visualization').replace(/[<>:"\\\\/|?*]+/g, '-') + '.png';
-      a.click();
-      setTimeout(function() {{ URL.revokeObjectURL(url); }}, 1200);
-      toast('PNG exported');
+      downloadBlob(blob, filename('chart'));
     }}, 'image/png');
+  }}
+
+  function closePngMenu() {{
+    var menu = document.getElementById('pngMenu');
+    if (menu) menu.classList.remove('show');
+  }}
+
+  function setupPngMenu() {{
+    var btn = document.getElementById('pngBtn');
+    var menu = document.getElementById('pngMenu');
+    if (!btn || !menu) return;
+    var html = '';
+    if (payload.template === 'analysis_dashboard') {{
+      html += '<button type="button" data-export="dashboard">整张看板</button>';
+      if (document.getElementById('analysisHero')) html += '<button type="button" data-export-canvas="analysisHero" data-suffix="hero">主图</button>';
+      var small = document.querySelectorAll('[id^="analysisSmall"]');
+      small.forEach(function(canvas, i) {{
+        html += '<button type="button" data-export-canvas="' + canvas.id + '" data-suffix="chart-' + (i + 1) + '">辅助图 ' + (i + 1) + '</button>';
+      }});
+    }} else {{
+      html += '<button type="button" data-export="chart">当前图表</button>';
+    }}
+    menu.innerHTML = html;
+    btn.onclick = function(e) {{
+      e.stopPropagation();
+      menu.classList.toggle('show');
+    }};
+    menu.onclick = function(e) {{
+      var item = e.target.closest('button');
+      if (!item) return;
+      closePngMenu();
+      if (item.dataset.export === 'dashboard') exportWholeDashboardPng();
+      else if (item.dataset.export === 'chart') exportPng();
+      else if (item.dataset.exportCanvas) exportCanvasPng(item.dataset.exportCanvas, item.dataset.suffix || 'chart');
+    }};
   }}
 
   function exportCsv() {{
@@ -1219,7 +1662,7 @@ def _build_html(
     }}
     var lines = [columns.map(csvEscape).join(',')];
     rows.forEach(function(row) {{
-      lines.push(columns.map(function(c) {{ return csvEscape(row[c]); }}).join(','));
+      lines.push(columns.map(function(c, ci) {{ return csvEscape(cellValue(row, c, ci)); }}).join(','));
     }});
     var bom = '\\uFEFF';
     var blob = new Blob([bom + lines.join('\\n')], {{type: 'text/csv;charset=utf-8'}});
@@ -1241,12 +1684,14 @@ def _build_html(
     chartSwitch.style.display = 'none';
     document.getElementById('pngBtn').style.display = 'none';
     document.getElementById('csvBtn').style.display = '';
+  }} else if (payload.template === 'analysis_dashboard') {{
+    chartSwitch.style.display = 'none';
   }}
 
-  document.getElementById('pngBtn').addEventListener('click', exportPng);
   document.getElementById('csvBtn').addEventListener('click', exportCsv);
   chartSwitch.addEventListener('change', render);
   window.addEventListener('resize', reportHeight);
+  document.addEventListener('click', closePngMenu);
 
   // Pagination event delegation
   stage.addEventListener('click', function(e) {{
@@ -1340,7 +1785,7 @@ def _render_response(
 
 
 class Tools:
-    """Template visualizer — three self-describing functions with flat parameters."""
+    """Template visualizer — four self-describing functions with flat parameters."""
 
     class Valves(BaseModel):
         show_stats: bool = Field(
@@ -1367,8 +1812,8 @@ class Tools:
         Render a data detail view with optional SQL, explanation, and data table.
 
         Use this whenever the user asks to see SQL, query explanations, or data
-        table previews. Also use it BEFORE render_chart or render_dashboard to
-        show the source data and query logic.
+        table previews. Also use it BEFORE render_chart, render_dashboard, or
+        render_analysis_dashboard to show the source data and query logic.
 
         :param columns: List of column name strings, e.g. ["month", "revenue"].
         :param rows: List of row objects, e.g. [{"month": "Jan", "revenue": 120}].
@@ -1421,9 +1866,10 @@ class Tools:
 
     async def render_chart(
         self,
-        series: Any,
+        series: Any = None,
         chart_type: ChartType = "line",
         y_columns: Any = None,
+        rows: Any = None,
         title: str = "Chart",
     ) -> tuple:
         """
@@ -1433,7 +1879,9 @@ class Tools:
         Use render_data_detail first if the user also wants to see SQL or the
         underlying data table.
 
-        Supports both single-series and multi-series data:
+        Supports both single-series and multi-series data. If the caller has
+        just shown render_data_detail, pass those same row objects as series;
+        rows is accepted only as a compatibility alias.
 
         Single series (backward compatible):
             series=[{"label": "Jan", "value": 120}, {"label": "Feb", "value": 148}]
@@ -1445,17 +1893,19 @@ class Tools:
             ]
             y_columns=["revenue", "users"]
 
-        :param series: List of data objects. Each must have a "label" key plus
+        :param series: List of data objects. Each must have one x-axis key plus
             one or more numeric value columns.
         :param chart_type: "line" (default), "bar", "pie" (doughnut), or "table".
         :param y_columns: Optional list of column names to plot on y-axis.
             If omitted, auto-detects: uses ["value"] if present, otherwise all
             numeric columns except "label".
+        :param rows: Compatibility alias for series when reusing data-detail rows.
         :param title: Short title displayed in the toolbar.
         :return: Inline HTML visualization with Chart.js rendering.
         """
         # Coerce and validate series
-        coerced = _coerce_list(series)
+        source_series = series if series is not None else rows
+        coerced = _coerce_list(source_series)
         if not isinstance(coerced, list) or len(coerced) == 0:
             return (
                 "Error: 'series' is required and must be a non-empty list. "
@@ -1563,6 +2013,7 @@ class Tools:
         series: Any = None,
         chart_title: str = "",
         chart_type: DashChartType = "line",
+        y_columns: Any = None,
         title: str = "Dashboard",
     ) -> tuple:
         """
@@ -1574,10 +2025,15 @@ class Tools:
         :param metrics: List of {label, value, delta?} objects.
             label=string, value=string|number, delta=optional change string (e.g. "+12.4%").
             Example: [{"label": "Revenue", "value": "$3.87M", "delta": "+12.4%"}]
-        :param series: Optional list of {label, value} for a trend chart.
-            Example: [{"label": "Jan", "value": 120}, {"label": "Feb", "value": 148}]
+        :param series: Optional list of data objects for a trend chart. Supports
+            both single-series (each has one x-axis key + one numeric key) and
+            multi-series (one x-axis key + multiple numeric value columns).
+            Example: [{"month": "Jan", "revenue": 120}, {"month": "Feb", "revenue": 148}]
+            Multi: [{"month": "Jan", "revenue": 120, "users": 500}, ...]
         :param chart_title: Label for the trend chart (optional).
         :param chart_type: "line" (default), "bar", "pie", or "table" for the trend chart.
+        :param y_columns: Optional list of column names to plot on y-axis.
+            If omitted, auto-detected from numeric fields.
         :param title: Short title displayed in the toolbar.
         :return: Inline HTML visualization with metric cards and Chart.js chart.
         """
@@ -1617,27 +2073,75 @@ class Tools:
 
         # Coerce and validate optional series
         clean_series: Optional[List[Dict[str, Any]]] = None
+        dash_x_col: str = "label"
+        dash_y_cols: List[str] = ["value"]
         if series is not None:
             coerced_series = _coerce_list(series)
             if isinstance(coerced_series, list) and len(coerced_series) > 0:
-                clean_series = []
+                clean: List[Dict[str, Any]] = []
                 for i, item in enumerate(coerced_series):
                     item = _coerce_dict(item)
                     if not isinstance(item, dict):
                         return (
                             f"Error: series[{i}] must be an object. "
-                            f'Example: {{"label": "Jan", "value": 120}}'
+                            f'Example: {{"month": "Jan", "revenue": 120}}'
                         )
-                    if "label" not in item or "value" not in item:
+                    clean.append(dict(item))
+
+                if not clean:
+                    return (
+                        "Error: 'series' must contain at least one valid object."
+                    )
+
+                # Resolve y_columns: explicit > "value" key detection > auto-detect numerics
+                coerced_y = _coerce_list(y_columns) if y_columns is not None else None
+                if coerced_y and isinstance(coerced_y, list) and len(coerced_y) > 0:
+                    dash_y_cols = [str(c) for c in coerced_y]
+                elif all("value" in item for item in clean):
+                    # Backward compat: all items have "value" → single series
+                    dash_y_cols = ["value"]
+                else:
+                    # Auto-detect: all numeric keys (int/float, not bool)
+                    first = clean[0]
+                    dash_y_cols = [
+                        k for k in first.keys()
+                        if isinstance(first[k], (int, float)) and not isinstance(first[k], bool)
+                    ]
+                    if not dash_y_cols:
                         return (
-                            f"Error: series[{i}] must have 'label' and 'value'. "
-                            f'Got keys: {list(item.keys())}'
+                            "Error: no numeric value columns found in dashboard series. "
+                            f"Got keys: {list(first.keys())}. "
+                            'Example: {"month": "Jan", "revenue": 120, "users": 500}'
                         )
-                    clean_series.append({
-                        "label": str(item["label"]),
-                        "value": item["value"],
-                    })
+
+                # Validate all y_columns exist in all items
+                for i, item in enumerate(clean):
+                    for col in dash_y_cols:
+                        if col not in item:
+                            return (
+                                f"Error: series[{i}] missing column '{col}'. "
+                                f"All dashboard y_columns must be present in every item. "
+                                f"Got keys: {list(item.keys())}"
+                            )
+
+                # Detect x column: first key in first item that isn't a y_column
+                for key in clean[0].keys():
+                    if key not in dash_y_cols:
+                        dash_x_col = key
+                        break
+
+                # Validate x_column exists in all items
+                for i, item in enumerate(clean):
+                    if dash_x_col not in item:
+                        return (
+                            f"Error: series[{i}] missing x-axis column '{dash_x_col}'. "
+                            f"Got keys: {list(item.keys())}"
+                        )
+
+                clean_series = clean
                 data["series"] = clean_series
+                data["x_column"] = dash_x_col
+                data["y_columns"] = dash_y_cols
 
         metric_count = len(clean_metrics)
         return _render_response(
@@ -1647,4 +2151,106 @@ class Tools:
             chart_type=chart_type,
             show_stats=self.valves.show_stats,
             label=f"Dashboard ({metric_count} metrics)",
+        )
+
+    # ================================================================
+    # render_analysis_dashboard
+    # ================================================================
+
+    async def render_analysis_dashboard(
+        self,
+        hero_chart: Any,
+        rankings: Any = None,
+        small_charts: Any = None,
+        summary_cards: Any = None,
+        subtitle: str = "",
+        title: str = "Analysis Dashboard",
+    ) -> tuple:
+        """
+        Render a fixed-layout, configurable-semantics analysis dashboard.
+
+        Use this for comprehensive monitoring or business analysis pages with
+        a main chart plus optional ranking, compact charts, and summary cards.
+        This does not replace render_data_detail: if the user asks for SQL,
+        raw rows, source data, or verification, call render_data_detail first,
+        then at most one analysis dashboard.
+
+        :param hero_chart: Required chart object with title, chart_type, series,
+            and optional y_columns.
+        :param rankings: Optional {"title": str, "items": [{label, value, unit?}]}.
+        :param small_charts: Optional list of up to two chart objects.
+        :param summary_cards: Optional KPI cards: [{label, value, delta?}].
+        :param subtitle: Optional subtitle under the dashboard title.
+        :param title: Dashboard title.
+        :return: Inline HTML analysis dashboard.
+        """
+        normalized_hero = _normalize_series_block(hero_chart, name="hero_chart")
+        if isinstance(normalized_hero, str):
+            return normalized_hero
+
+        data: Dict[str, Any] = {
+            "title": str(title or "Analysis Dashboard"),
+            "subtitle": str(subtitle or ""),
+            "heroChart": normalized_hero,
+        }
+
+        if rankings is not None:
+            rankings_obj = _coerce_dict(rankings)
+            if not isinstance(rankings_obj, dict):
+                return "Error: 'rankings' must be an object with title and items."
+            items = _coerce_list(rankings_obj.get("items"))
+            if not isinstance(items, list) or len(items) == 0:
+                return "Error: 'rankings.items' must be a non-empty list when rankings is provided."
+            clean_items: List[Dict[str, Any]] = []
+            for i, item in enumerate(items):
+                item = _coerce_dict(item)
+                if not isinstance(item, dict) or "label" not in item or "value" not in item:
+                    return f"Error: rankings.items[{i}] must have label and value."
+                clean_items.append({
+                    "label": str(item["label"]),
+                    "value": item["value"],
+                    "unit": str(item.get("unit", "")),
+                })
+            data["rankings"] = {
+                "title": str(rankings_obj.get("title") or "Ranking"),
+                "items": clean_items,
+            }
+
+        if small_charts is not None:
+            chart_list = _coerce_list(small_charts)
+            if not isinstance(chart_list, list):
+                return "Error: 'small_charts' must be a list of chart objects."
+            normalized_small: List[Dict[str, Any]] = []
+            for i, chart in enumerate(chart_list[:2]):
+                normalized = _normalize_series_block(chart, name=f"small_charts[{i}]")
+                if isinstance(normalized, str):
+                    return normalized
+                normalized_small.append(normalized)
+            if normalized_small:
+                data["smallCharts"] = normalized_small
+
+        if summary_cards is not None:
+            cards = _coerce_list(summary_cards)
+            if not isinstance(cards, list):
+                return "Error: 'summary_cards' must be a list of {label, value, delta?} objects."
+            clean_cards: List[Dict[str, Any]] = []
+            for i, card in enumerate(cards):
+                card = _coerce_dict(card)
+                if not isinstance(card, dict) or "label" not in card or "value" not in card:
+                    return f"Error: summary_cards[{i}] must have label and value."
+                clean_cards.append({
+                    "label": str(card["label"]),
+                    "value": card["value"],
+                    "delta": str(card.get("delta", "")),
+                })
+            if clean_cards:
+                data["summaryCards"] = clean_cards
+
+        return _render_response(
+            title=title,
+            template="analysis_dashboard",
+            data=data,
+            chart_type=normalized_hero["chartType"],
+            show_stats=self.valves.show_stats,
+            label="Analysis dashboard",
         )
