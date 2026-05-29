@@ -94,7 +94,13 @@ class AnalysisDashboardTest(unittest.TestCase):
         self.assertIn("never call render_chart, render_dashboard, or render_analysis_dashboard before render_data_detail", module.__doc__)
         self.assertIn("Data detail first does not imply analysis dashboard", module.__doc__)
         self.assertIn("For a simple trend, bar, pie, or table request, use render_chart", module.__doc__)
+        self.assertIn("For hourly changes of one metric, use render_chart", module.__doc__)
         self.assertIn("convert the same rows into the render_chart series parameter", module.__doc__)
+        self.assertIn("render_dashboard is only for KPI cards plus an optional trend chart", module.__doc__)
+        self.assertIn("Do not use render_analysis_dashboard for simple hourly changes", module.__doc__)
+        self.assertIn("y_axis_label: complete y-axis label", module.__doc__)
+        self.assertIn("y_axis_unit: unit for exactly one y-axis column", module.__doc__)
+        self.assertIn("Never guess units from values", module.__doc__)
 
     def test_skill_limits_analysis_dashboard_to_explicit_multi_module_requests(self):
         skill = __import__("pathlib").Path(__file__).with_name("SKILL.md").read_text(encoding="utf-8")
@@ -169,6 +175,36 @@ class AnalysisDashboardTest(unittest.TestCase):
         )
 
         self.assertIn("series.map(function(_, i) { return COLORS[i % COLORS.length]; })", html)
+
+    def test_analysis_dashboard_chart_blocks_support_y_axis_labels(self):
+        html = self.render_analysis_html(
+            title="Grid Load Analysis",
+            hero_chart={
+                "title": "Hourly Load",
+                "chart_type": "line",
+                "series": [
+                    {"hour": "00:00", "load": 1200},
+                    {"hour": "01:00", "load": 1480},
+                ],
+                "y_axis_unit": "MW",
+            },
+            small_charts=[
+                {
+                    "title": "Temperature",
+                    "chart_type": "line",
+                    "series": [
+                        {"hour": "00:00", "temperature": 31},
+                        {"hour": "01:00", "temperature": 32},
+                    ],
+                    "y_axis_label": "Temperature (C)",
+                }
+            ],
+        )
+
+        self.assertIn('"y_axis_label":"load (MW)"', html)
+        self.assertIn('"y_axis_label":"Temperature (C)"', html)
+        self.assertIn("var yAxisLabel = axisTitleFromData(block, yCols);", html)
+        self.assertIn("y: yScaleOptions(yAxisLabel, textColor, gridColor)", html)
 
 
 if __name__ == "__main__":

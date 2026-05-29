@@ -12,7 +12,7 @@ A curated collection of plugins for [Open WebUI](https://github.com/open-webui/o
 |--------|------|--------|-------------|
 | [Inline Visualizer v2](inline-visualizer-v2/) | Tool + Skill | Classic298 | Streaming live-render visualization engine — watch HTML/SVG paint token-by-token |
 | [Inline Visualizer v3](inline-visualizer-v3/) | Tool + Skill | **Derek** | Next-gen streaming visualizer with enhanced design system, bilingual skill support, and expanded bridge architecture |
-| [Inline Visualizer Template](inline-visualizer-template/) | Tool + Skill | **Derek** | Rapid template-based visualization — 3 self-describing functions, flat parameters, zero code generation |
+| [Inline Visualizer Template](inline-visualizer-template/) | Tool + Skill | **Derek** | Rapid template-based visualization — 4 self-describing functions, flat parameters, zero code generation |
 | [Inline Visualizer v1](inline-visualizer/) | Tool + Skill | Classic298 | Legacy static render engine — one-shot HTMLResponse mode |
 | [Email Composer](email-composer/) | Tool | Classic298 | AI-powered email drafting with rich UI card |
 | [MCP App Bridge](mcp-app-bridge/) | Tool | Classic298 | Renders MCP Apps (SEP-1865) as Rich UI embeds |
@@ -61,26 +61,28 @@ Independently developed by **Derek**, v3 evolves the streaming architecture with
 
 ### Template — Inline Visualizer Template (Rapid Templating)
 
-Independently developed by **Derek**, this plugin takes a fundamentally different approach: instead of having the model generate HTML/CSS/JS from scratch, it provides **3 self-describing functions** with flat parameter signatures. The model passes structured JSON data, and the tool handles all rendering internally using Chart.js.
+Independently developed by **Derek**, this plugin takes a fundamentally different approach: instead of having the model generate HTML/CSS/JS from scratch, it provides **4 self-describing functions** with flat parameter signatures. The model passes structured JSON data, and the tool handles all rendering internally using Chart.js.
 
-**Design philosophy:** v3's `render_visual_template` uses a single function with a `template` enum + nested `data` dict. Models see `data: Optional[Dict[str, Any]]` and cannot understand the expected structure. Template v4 (this plugin) splits into 3 independent functions where **each function's parameters ARE its schema** — models understand the contract directly from the function signature.
+**Design philosophy:** v3's `render_visual_template` uses a single function with a `template` enum + nested `data` dict. Models see `data: Optional[Dict[str, Any]]` and cannot understand the expected structure. Template v4 (this plugin) splits into 4 independent functions where **each function's parameters ARE its schema** — models understand the contract directly from the function signature.
 
-| Dimension | v3 (generic function) | Template (3 functions) |
+| Dimension | v3 (generic function) | Template (4 functions) |
 |-----------|----------------------|------------------------|
-| Function count | 1 generic function | 3 independent functions |
+| Function count | 1 generic function | 4 independent functions |
 | Parameter design | Nested `data` dict | Flat typed parameters |
 | Schema definition | SKILL.md documentation | Function signature + parameter names |
 | Validation location | Browser JS | Python side |
 | Error feedback | HTML error card | Plain text error message |
 | Model instructions | External SKILL.md | Built-in `tool_instructions` |
 
-**Three functions:**
+**Four functions:**
 
 1. **`render_data_detail`** — SQL + explanation + data table preview. `columns` and `rows` required. SQL and explanation auto-collapsed, table always visible with pagination for >10 rows.
 
-2. **`render_chart`** — Line, bar, pie (doughnut via Chart.js), or table. `series` as `[{label, value}]` array. Multi-column support with `y_columns`. Auto-detects numeric columns. Chart type switcher, PNG export.
+2. **`render_chart`** — Line, bar, pie (doughnut via Chart.js), or table. `series` as row objects with one x-axis key plus one or more numeric y columns (`[{label, value}]` remains a simple compatibility form). Multi-column support with `y_columns`. Auto-detects numeric columns. Unit-safe y-axis labels for line/bar charts. Chart type switcher, PNG export.
 
 3. **`render_dashboard`** — KPI metric cards + optional trend chart. `metrics` as `[{label, value, delta?}]`. Delta auto-colored (green for `+`, red for `-`). Optional `series` for trend chart below cards.
+
+4. **`render_analysis_dashboard`** — Comprehensive monitoring/diagnostic dashboard with KPI, trend, breakdown, ranking, narrative, and alert modules.
 
 **Key advantages:**
 
@@ -89,7 +91,7 @@ Independently developed by **Derek**, this plugin takes a fundamentally differen
 - **Built-in interactivity** — Chart type switching (line/bar/pie/table), PNG export, auto dark mode, render statistics (JSON length, HTML length, build time, render time).
 - **Complements v3, not replaces it** — Use Template for high-frequency data charts, KPI dashboards, and SQL data previews. Use v3 for complex custom visualizations, interactive diagrams, maps, and creative layouts.
 
-**Recommended call flow:** `render_data_detail` first (show data source + SQL) → then `render_chart` or `render_dashboard` (the visualization).
+**Recommended call flow:** `render_data_detail` first (show data source + SQL) → then `render_chart` for single charts, `render_dashboard` for lightweight KPI overviews, or `render_analysis_dashboard` for explicit comprehensive, monitoring, or diagnostic dashboard requests.
 
 **Effect:** Template turns "show me a chart of this data" from a multi-hundred-token HTML generation task into a ~50-token JSON parameter pass. Success rate approaches 100% for structured data visualization. The model focuses on data analysis, not frontend coding.
 

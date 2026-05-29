@@ -12,7 +12,7 @@
 |------|------|------|------|
 | [Inline Visualizer v2](inline-visualizer-v2/) | 工具 + 技能 | Classic298 | 流式实时渲染可视化引擎 — 逐token见证 HTML/SVG 绘制过程 |
 | [Inline Visualizer v3](inline-visualizer-v3/) | 工具 + 技能 | **Derek** | 新一代流式可视化，增强设计系统、双语技能支持、扩展桥接架构 |
-| [Inline Visualizer Template](inline-visualizer-template/) | 工具 + 技能 | **Derek** | 快速模板可视化 — 3 个自描述函数，扁平参数，零代码生成 |
+| [Inline Visualizer Template](inline-visualizer-template/) | 工具 + 技能 | **Derek** | 快速模板可视化 — 4 个自描述函数，扁平参数，零代码生成 |
 | [Inline Visualizer v1](inline-visualizer/) | 工具 + 技能 | Classic298 | 传统静态渲染引擎 — 一次性 HTMLResponse 模式 |
 | [Email Composer](email-composer/) | 工具 | Classic298 | AI 驱动的邮件撰写，带富交互 UI 卡片 |
 | [MCP App Bridge](mcp-app-bridge/) | 工具 | Classic298 | 将 MCP 应用 (SEP-1865) 渲染为富 UI 嵌入 |
@@ -61,26 +61,28 @@
 
 ### Template — Inline Visualizer Template（快速模板可视化）
 
-由 **Derek** 独立研发，该插件采用完全不同的设计思路：不再让模型从零生成 HTML/CSS/JS，而是提供 **3 个自描述函数**，每个函数具有扁平的参数签名。模型传入结构化的 JSON 数据，工具内部使用 Chart.js 完成所有渲染。
+由 **Derek** 独立研发，该插件采用完全不同的设计思路：不再让模型从零生成 HTML/CSS/JS，而是提供 **4 个自描述函数**，每个函数具有扁平的参数签名。模型传入结构化的 JSON 数据，工具内部使用 Chart.js 完成所有渲染。
 
-**设计理念：** v3 的 `render_visual_template` 使用单一函数配合 `template` 枚举 + 嵌套 `data` 字典。模型看到 `data: Optional[Dict[str, Any]]` 无法理解具体的结构要求。Template v4（本插件）拆分为 3 个独立函数，**每个函数的参数即其 schema** — 模型从函数签名中直接理解参数契约。
+**设计理念：** v3 的 `render_visual_template` 使用单一函数配合 `template` 枚举 + 嵌套 `data` 字典。模型看到 `data: Optional[Dict[str, Any]]` 无法理解具体的结构要求。Template v4（本插件）拆分为 4 个独立函数，**每个函数的参数即其 schema** — 模型从函数签名中直接理解参数契约。
 
-| 维度 | v3（通用函数） | Template（3 个独立函数） |
+| 维度 | v3（通用函数） | Template（4 个独立函数） |
 |------|--------------|------------------------|
-| 函数数量 | 1 个通用函数 | 3 个独立函数 |
+| 函数数量 | 1 个通用函数 | 4 个独立函数 |
 | 参数设计 | 嵌套 `data` 字典 | 扁平类型参数 |
 | Schema 定义 | SKILL.md 文档 | 函数签名 + 参数名 |
 | 验证位置 | 浏览器 JS | Python 端 |
 | 错误反馈 | HTML 错误卡片 | 纯文本错误消息 |
 | 模型指令 | 依赖外部 SKILL.md | 内置 `tool_instructions` |
 
-**三个函数：**
+**四个函数：**
 
 1. **`render_data_detail`** — SQL + 解释 + 数据表预览。`columns` 和 `rows` 必填。SQL 和解释自动折叠，数据表始终可见，超过 10 行自动分页。
 
-2. **`render_chart`** — 折线图、柱状图、饼图（Chart.js doughnut）、表格。`series` 为 `[{label, value}]` 数组。支持多列数据配合 `y_columns`。自动检测数值列。图表类型切换、PNG 导出。
+2. **`render_chart`** — 折线图、柱状图、饼图（Chart.js doughnut）、表格。`series` 为行对象数组，包含一个 x 轴键和一个或多个数值 y 列（`[{label, value}]` 仍作为简单兼容格式）。支持多列数据配合 `y_columns`。自动检测数值列。折线/柱状图支持单位安全的 y 轴名称。图表类型切换、PNG 导出。
 
 3. **`render_dashboard`** — KPI 指标卡 + 可选趋势图。`metrics` 为 `[{label, value, delta?}]`。Delta 自动着色（`+` 绿色，`-` 红色）。可选 `series` 在指标卡下方渲染趋势图。
+
+4. **`render_analysis_dashboard`** — 综合监控/诊断看板，包含 KPI、趋势、拆分、排行、说明和告警模块。
 
 **核心优势：**
 
@@ -89,7 +91,7 @@
 - **内置交互功能** — 图表类型切换（line/bar/pie/table）、PNG 导出、自动深色模式、渲染统计信息（JSON 长度、HTML 长度、构建耗时、渲染耗时）。
 - **补充 v3，而非替代** — 高频数据图表、KPI 仪表盘、SQL 数据预览使用 Template。复杂自定义可视化、交互图示、地图、创意布局使用 v3。
 
-**推荐调用流程：** 先 `render_data_detail`（展示数据来源和 SQL）→ 再 `render_chart` 或 `render_dashboard`（呈现可视化）。
+**推荐调用流程：** 先 `render_data_detail`（展示数据来源和 SQL）→ 单图请求再调用 `render_chart`，轻量 KPI 概览再调用 `render_dashboard`，明确要求综合分析、监控或诊断看板时再调用 `render_analysis_dashboard`。
 
 **效果：** Template 将"给我画个数据图表"从需要数百 token 的 HTML 生成任务转变为约 50 token 的 JSON 参数传递。结构化数据可视化的成功率接近 100%。模型专注于数据分析，而非前端编码。
 

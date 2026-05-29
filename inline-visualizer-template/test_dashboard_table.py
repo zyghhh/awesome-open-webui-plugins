@@ -129,6 +129,70 @@ class DashboardTableTest(unittest.TestCase):
         self.assertIn('"x_column":"month"', html)
         self.assertIn('"y_columns":["revenue"]', html)
 
+    def test_render_chart_uses_explicit_y_axis_label(self):
+        html = self.render_chart_html(
+            series=[
+                {"month": "Jan", "revenue": 120},
+                {"month": "Feb", "revenue": 148},
+            ],
+            chart_type="line",
+            y_axis_label="Revenue (USD)",
+            title="Monthly Revenue",
+        )
+
+        self.assertIn('"y_axis_label":"Revenue (USD)"', html)
+        self.assertIn("function yScaleOptions(yAxisLabel, textColor, gridColor)", html)
+        self.assertIn("title: {", html)
+        self.assertIn("text: yAxisLabel", html)
+        self.assertIn("y: yScaleOptions(yAxisLabel, textColor, gridColor)", html)
+
+    def test_render_chart_combines_single_y_column_with_explicit_unit(self):
+        html = self.render_chart_html(
+            series=[
+                {"time": "00:00", "requests": 120},
+                {"time": "01:00", "requests": 148},
+            ],
+            chart_type="bar",
+            y_axis_unit="rpm",
+            title="Request Rate",
+        )
+
+        self.assertIn('"y_columns":["requests"]', html)
+        self.assertIn('"y_axis_label":"requests (rpm)"', html)
+
+    def test_render_chart_does_not_apply_unit_to_multiple_y_columns(self):
+        html = self.render_chart_html(
+            series=[
+                {"month": "Jan", "revenue": 120, "users": 500},
+                {"month": "Feb", "revenue": 148, "users": 600},
+            ],
+            chart_type="line",
+            y_columns=["revenue", "users"],
+            y_axis_unit="USD",
+            title="Revenue and Users",
+        )
+
+        self.assertIn('"y_columns":["revenue","users"]', html)
+        self.assertIn('"y_axis_label":"revenue, users"', html)
+        self.assertNotIn('"y_axis_label":"revenue, users (USD)"', html)
+        self.assertNotIn('"y_axis_label":"revenue (USD), users (USD)"', html)
+
+    def test_render_dashboard_applies_same_y_axis_label_rules(self):
+        html = self.render_dashboard_html(
+            metrics=[{"label": "Peak", "value": "5,677 rpm"}],
+            series=[
+                {"time": "00:00", "requests": 120},
+                {"time": "01:00", "requests": 148},
+            ],
+            chart_type="line",
+            y_axis_label="Requests (rpm)",
+            title="Traffic Dashboard",
+        )
+
+        self.assertIn('"y_axis_label":"Requests (rpm)"', html)
+        self.assertIn("var dashYAxisLabel = axisTitleFromData(data, dashYCols);", html)
+        self.assertIn("y: yScaleOptions(dashYAxisLabel, textColor, gridColor)", html)
+
 
 if __name__ == "__main__":
     unittest.main()

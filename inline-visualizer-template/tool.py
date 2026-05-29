@@ -23,6 +23,9 @@ tool_instructions: |
   - You must never call render_chart, render_dashboard, or render_analysis_dashboard before render_data_detail.
   - Data detail first does not imply analysis dashboard. Choose the second visualization by user intent.
   - For a simple trend, bar, pie, or table request, use render_chart after render_data_detail.
+  - For hourly changes of one metric, use render_chart after render_data_detail.
+  - Do not use render_analysis_dashboard for simple hourly changes, a single trend, a single bar chart, a pie chart, or a table.
+  - render_dashboard is only for KPI cards plus an optional trend chart. Do not use it for a single-chart request.
   - After render_data_detail, convert the same rows into the render_chart series parameter.
     Do not omit series when calling render_chart.
 
@@ -78,6 +81,10 @@ tool_instructions: |
   series: list of objects (required). Each must have one x-axis key (string) plus one or more numeric value columns.
   rows: accepted as a compatibility alias for series when reusing render_data_detail rows.
   y_columns: which columns to plot on y-axis (optional). Auto-detected if omitted.
+  y_axis_label: complete y-axis label, including unit when needed, e.g. "Load (MW)".
+    Prefer this when the exported PNG must be understandable on its own.
+  y_axis_unit: unit for exactly one y-axis column, e.g. "MW". Ignored for multiple
+    y_columns to avoid incorrect units. Never guess units from values.
   chart_type: "line" | "bar" | "pie" | "table" (optional, defaults to "line").
   title: shown in the toolbar (optional, defaults to "Chart").
 
@@ -93,6 +100,7 @@ tool_instructions: |
       {"month": "Feb", "revenue": 148, "users": 600}
     ],
     "y_columns": ["revenue", "users"],
+    "y_axis_label": "Revenue and Users",
     "chart_title": "Monthly Trend",
     "chart_type": "line",
     "title": "Q1 Overview"
@@ -104,6 +112,9 @@ tool_instructions: |
   series: optional trend chart data. Supports single-series (backward compat: list of {label, value})
     and multi-series (list of objects with x-axis key + multiple numeric columns).
   y_columns: which numeric columns to plot for multi-series (optional, auto-detected if omitted).
+  y_axis_label: complete y-axis label for the trend chart, including unit when needed.
+  y_axis_unit: unit for exactly one y-axis column. Ignored for multiple y_columns
+    to avoid incorrect units. Never guess units from values.
   chart_title: label for the trend chart (optional).
   chart_type: "line" | "bar" | "pie" | "table" for the trend chart (optional, defaults to "line").
   title: shown in the toolbar (optional, defaults to "Dashboard").
@@ -142,8 +153,10 @@ tool_instructions: |
   }
 
   hero_chart: required main chart object. Same series/y_columns rules as render_chart.
+    Optional y_axis_label and y_axis_unit follow render_chart rules.
   rankings: optional top-N/ranking object; use for peaks, contribution, top regions/items.
-  small_charts: optional list of 1-2 compact chart objects.
+  small_charts: optional list of 1-2 compact chart objects. Each chart may include
+    y_axis_label or y_axis_unit using the same unit-safety rules.
   summary_cards: optional bottom KPI cards.
 
   After calling any of these functions, only describe what the visualization shows in natural language. Do NOT output HTML, CSS, SVG, or JavaScript.
@@ -284,13 +297,47 @@ def _normalize_series_block(block: Any, *, name: str) -> Any:
     if chart_type not in ("line", "bar", "pie", "table"):
         return f"Error: '{name}.chart_type' must be line, bar, pie, or table."
 
-    return {
+    normalized = {
         "title": str(block.get("title") or "Chart"),
         "chartType": chart_type,
         "series": clean,
         "y_columns": y_cols,
         "x_column": x_col,
     }
+    normalized["y_axis_label"] = _resolve_y_axis_label(
+        y_cols,
+        y_axis_label=str(block.get("y_axis_label") or ""),
+        y_axis_unit=str(block.get("y_axis_unit") or ""),
+        chart_type=chart_type,
+    )
+    return normalized
+
+
+def _resolve_y_axis_label(
+    y_columns: List[str],
+    *,
+    y_axis_label: str = "",
+    y_axis_unit: str = "",
+    chart_type: str = "line",
+) -> str:
+    """Return a display-safe y-axis label without guessing units."""
+    if chart_type in {"pie", "table"}:
+        return ""
+
+    explicit_label = str(y_axis_label or "").strip()
+    if explicit_label:
+        return explicit_label
+
+    clean_columns = [str(col).strip() for col in y_columns if str(col).strip()]
+    if not clean_columns:
+        return ""
+
+    base_label = clean_columns[0] if len(clean_columns) == 1 else ", ".join(clean_columns)
+    explicit_unit = str(y_axis_unit or "").strip()
+    if explicit_unit and len(clean_columns) == 1:
+        return f"{base_label} ({explicit_unit})"
+
+    return base_label
 
 
 # ---------------------------------------------------------------------------
@@ -963,6 +1010,27 @@ def _build_html(
     }});
   }}
 
+  function axisTitleFromData(data, yCols) {{
+    if (data && typeof data.y_axis_label === 'string') return data.y_axis_label.trim();
+    if (!Array.isArray(yCols) || yCols.length === 0) return '';
+    return yCols.map(function(col) {{ return String(col); }}).join(', ');
+  }}
+
+  function yScaleOptions(yAxisLabel, textColor, gridColor) {{
+    return {{
+      grid: {{ color: gridColor }},
+      ticks: {{ color: textColor, font: {{size:11}} }},
+      border: {{ display: false }},
+      title: {{
+        display: !!yAxisLabel,
+        text: yAxisLabel,
+        color: textColor,
+        font: {{ size: 11, weight: '600' }},
+        padding: {{ bottom: 6 }}
+      }}
+    }};
+  }}
+
   // -------------------------------------------------------------------
   // Schema validators — return {{valid, error, expected}}
   // -------------------------------------------------------------------
@@ -1173,6 +1241,7 @@ def _build_html(
     var gridColor = getCssVar('--color-border-tertiary');
     var bgColor = getCssVar('--color-bg-primary');
     var datasets = buildChartDatasets(series, yCols, isMulti, chartType, 4, 6, bgColor);
+    var yAxisLabel = axisTitleFromData(data, yCols);
 
     if (chartType === 'pie') {{
       // Pie only uses first y_column (single ring)
@@ -1211,7 +1280,7 @@ def _build_html(
           }},
           scales: {{
             x: {{ grid: {{ display: false }}, ticks: {{ color: textColor, font: {{size:11}} }}, border: {{ color: gridColor }} }},
-            y: {{ grid: {{ color: gridColor }}, ticks: {{ color: textColor, font: {{size:11}} }}, border: {{ display: false }} }}
+            y: yScaleOptions(yAxisLabel, textColor, gridColor)
           }}
         }}
       }});
@@ -1229,7 +1298,7 @@ def _build_html(
           }},
           scales: {{
             x: {{ grid: {{ display: false }}, ticks: {{ color: textColor, font: {{size:11}}, maxRotation: 45 }}, border: {{ color: gridColor }} }},
-            y: {{ grid: {{ color: gridColor }}, ticks: {{ color: textColor, font: {{size:11}} }}, border: {{ display: false }} }}
+            y: yScaleOptions(yAxisLabel, textColor, gridColor)
           }}
         }}
       }});
@@ -1343,6 +1412,7 @@ def _build_html(
       var bgColor = getCssVar('--color-bg-primary');
 
       var datasets = buildChartDatasets(series, dashYCols, dashMulti, chartType, 3, 5, bgColor);
+      var dashYAxisLabel = axisTitleFromData(data, dashYCols);
 
       if (chartType === 'pie') {{
         currentChart = new Chart(ctx, {{
@@ -1366,7 +1436,7 @@ def _build_html(
               legend: dashMulti ? buildLegendConfig('bar', 'multi') : {{ display: false }},
               tooltip: {{ backgroundColor: getCssVar('--color-bg-secondary'), titleColor: textColor, bodyColor: textColor, borderColor: gridColor, borderWidth: 0.5 }}
             }},
-            scales: {{ x: {{ grid: {{display:false}}, ticks: {{color:textColor,font:{{size:11}}}}, border: {{color:gridColor}} }}, y: {{ grid: {{color:gridColor}}, ticks: {{color:textColor,font:{{size:11}}}}, border: {{display:false}} }} }}
+            scales: {{ x: {{ grid: {{display:false}}, ticks: {{color:textColor,font:{{size:11}}}}, border: {{color:gridColor}} }}, y: yScaleOptions(dashYAxisLabel, textColor, gridColor) }}
           }}
         }});
       }} else {{
@@ -1380,7 +1450,7 @@ def _build_html(
               legend: dashMulti ? buildLegendConfig('line', 'multi') : {{ display: false }},
               tooltip: {{ backgroundColor: getCssVar('--color-bg-secondary'), titleColor: textColor, bodyColor: textColor, borderColor: gridColor, borderWidth: 0.5 }}
             }},
-            scales: {{ x: {{ grid: {{display:false}}, ticks: {{color:textColor,font:{{size:11}},maxRotation:45}}, border: {{color:gridColor}} }}, y: {{ grid: {{color:gridColor}}, ticks: {{color:textColor,font:{{size:11}}}}, border: {{display:false}} }} }}
+            scales: {{ x: {{ grid: {{display:false}}, ticks: {{color:textColor,font:{{size:11}},maxRotation:45}}, border: {{color:gridColor}} }}, y: yScaleOptions(dashYAxisLabel, textColor, gridColor) }}
           }}
         }});
       }}
@@ -1421,6 +1491,7 @@ def _build_html(
     var gridColor = getCssVar('--color-border-tertiary');
     var bgColor = getCssVar('--color-bg-primary');
     var datasets = buildChartDatasets(series, yCols, isMulti, chartType, compact ? 2 : 3, compact ? 4 : 5, bgColor);
+    var yAxisLabel = axisTitleFromData(block, yCols);
 
     if (chartType === 'pie') {{
       new Chart(ctx, {{
@@ -1444,7 +1515,7 @@ def _build_html(
         }},
         scales: {{
           x: {{ grid: {{ display: false }}, ticks: {{ color: textColor, font: {{ size: compact ? 10 : 11 }}, maxRotation: 45 }}, border: {{ color: gridColor }} }},
-          y: {{ grid: {{ color: gridColor }}, ticks: {{ color: textColor, font: {{ size: compact ? 10 : 11 }} }}, border: {{ display: false }} }}
+          y: yScaleOptions(yAxisLabel, textColor, gridColor)
         }}
       }}
     }});
@@ -1871,6 +1942,8 @@ class Tools:
         y_columns: Any = None,
         rows: Any = None,
         title: str = "Chart",
+        y_axis_label: str = "",
+        y_axis_unit: str = "",
     ) -> tuple:
         """
         Render a chart: line, bar, pie (doughnut), or table.
@@ -1899,6 +1972,10 @@ class Tools:
         :param y_columns: Optional list of column names to plot on y-axis.
             If omitted, auto-detects: uses ["value"] if present, otherwise all
             numeric columns except "label".
+        :param y_axis_label: Optional complete y-axis label, including unit when
+            needed, e.g. "Revenue (USD)". Highest priority and never modified.
+        :param y_axis_unit: Optional unit for exactly one y-column, e.g. "rpm".
+            Ignored for multi-series charts to avoid incorrect unit display.
         :param rows: Compatibility alias for series when reusing data-detail rows.
         :param title: Short title displayed in the toolbar.
         :return: Inline HTML visualization with Chart.js rendering.
@@ -1986,6 +2063,12 @@ class Tools:
             "y_columns": resolved_y,
             "x_column": x_col,
         }
+        data["y_axis_label"] = _resolve_y_axis_label(
+            resolved_y,
+            y_axis_label=y_axis_label,
+            y_axis_unit=y_axis_unit,
+            chart_type=chart_type,
+        )
 
         # For table chart_type, auto-detect x-column from keys
         if chart_type == "table":
@@ -2015,6 +2098,8 @@ class Tools:
         chart_type: DashChartType = "line",
         y_columns: Any = None,
         title: str = "Dashboard",
+        y_axis_label: str = "",
+        y_axis_unit: str = "",
     ) -> tuple:
         """
         Render a dashboard with KPI metric cards and an optional trend chart.
@@ -2034,6 +2119,10 @@ class Tools:
         :param chart_type: "line" (default), "bar", "pie", or "table" for the trend chart.
         :param y_columns: Optional list of column names to plot on y-axis.
             If omitted, auto-detected from numeric fields.
+        :param y_axis_label: Optional complete y-axis label for the trend chart,
+            including unit when needed, e.g. "Requests (rpm)".
+        :param y_axis_unit: Optional trend chart unit for exactly one y-column.
+            Ignored for multi-series trend charts to avoid incorrect units.
         :param title: Short title displayed in the toolbar.
         :return: Inline HTML visualization with metric cards and Chart.js chart.
         """
@@ -2142,6 +2231,12 @@ class Tools:
                 data["series"] = clean_series
                 data["x_column"] = dash_x_col
                 data["y_columns"] = dash_y_cols
+                data["y_axis_label"] = _resolve_y_axis_label(
+                    dash_y_cols,
+                    y_axis_label=y_axis_label,
+                    y_axis_unit=y_axis_unit,
+                    chart_type=chart_type,
+                )
 
         metric_count = len(clean_metrics)
         return _render_response(
@@ -2176,9 +2271,10 @@ class Tools:
         then at most one analysis dashboard.
 
         :param hero_chart: Required chart object with title, chart_type, series,
-            and optional y_columns.
+            and optional y_columns, y_axis_label, or y_axis_unit.
         :param rankings: Optional {"title": str, "items": [{label, value, unit?}]}.
-        :param small_charts: Optional list of up to two chart objects.
+        :param small_charts: Optional list of up to two chart objects. Each chart
+            supports optional y_axis_label and y_axis_unit.
         :param summary_cards: Optional KPI cards: [{label, value, delta?}].
         :param subtitle: Optional subtitle under the dashboard title.
         :param title: Dashboard title.

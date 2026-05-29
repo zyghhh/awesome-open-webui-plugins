@@ -46,8 +46,11 @@ SQL + 解释 + 数据表预览。
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `series` | `list[dict]` | 是 | `[{label, value}]` 数组，label 为字符串，value 为数字 |
+| `series` | `list[dict]` | 是 | 行数据对象数组：一个 x 轴键（如 `label`、`date`、`name`）加一个或多个数值 y 列；`[{label, value}]` 仍可作为兼容/简单示例 |
 | `chart_type` | `"line" \| "bar" \| "pie" \| "table"` | 否 | 图表类型，默认 "line" |
+| `y_columns` | `list[str]` | 否 | 指定绘图数值列；不传时优先使用 `value`，否则自动检测数值列。`pie` 只使用第一个数值列 |
+| `y_axis_label` | `str` | 否 | 完整 y 轴名称和单位，如 `"Revenue (USD)"`；优先级最高，导出 PNG 会包含 |
+| `y_axis_unit` | `str` | 否 | 单 y 列图表的单位，如 `"rpm"`；多 y 列时不会自动套用，避免单位错误 |
 | `title` | `str` | 否 | 标题，默认 "Chart" |
 
 ### render_dashboard
@@ -61,7 +64,11 @@ SQL + 解释 + 数据表预览。
 | `chart_title` | `str` | 否 | 趋势图标题 |
 | `chart_type` | `"line" \| "bar" \| "pie" \| "table"` | 否 | 趋势图类型，默认 "line" |
 | `y_columns` | `list[str]` | 否 | 指定绘图数值列；不传时优先使用 `value`，否则自动检测数值列。`pie` 只使用第一个数值列 |
+| `y_axis_label` | `str` | 否 | 趋势图完整 y 轴名称和单位，如 `"Requests (rpm)"`；导出 PNG 会包含 |
+| `y_axis_unit` | `str` | 否 | 单 y 列趋势图的单位；多 y 列时不会自动套用 |
 | `title` | `str` | 否 | 标题，默认 "Dashboard" |
+
+单位规则：工具不会从数据值里猜单位。需要准确单位时优先传 `y_axis_label`，例如 `"Revenue (USD)"`。只有单个 y 列时才使用 `y_axis_unit` 自动组合为 `列名 (单位)`；多 y 列图表如果单位不同，必须用不含错误单位的 `y_axis_label` 或只显示列名。
 
 ### render_analysis_dashboard
 
