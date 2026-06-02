@@ -42,6 +42,12 @@ def load_tool_module():
 
 
 class DashboardTableTest(unittest.TestCase):
+    def render_data_detail_html(self, **kwargs):
+        module = load_tool_module()
+        tool = module.Tools()
+        response, _ = asyncio.run(tool.render_data_detail(**kwargs))
+        return response.body.decode("utf-8")
+
     def render_chart_html(self, **kwargs):
         module = load_tool_module()
         tool = module.Tools()
@@ -69,6 +75,17 @@ class DashboardTableTest(unittest.TestCase):
         self.assertIn("if (chartType === 'table')", html)
         self.assertIn("renderDashboardTable(series, dashXCol, dashYCols)", html)
         self.assertNotIn("if (chartType === 'table') { chartType = 'line'; }", html)
+
+    def test_data_detail_parses_json_wrapped_sql_before_normalizing_newlines(self):
+        html = self.render_data_detail_html(
+            columns=["month", "revenue"],
+            rows=[{"month": "Jan", "revenue": 120}],
+            sql='{"sql":"SELECT month, revenue\\nFROM sales\\nORDER BY month"}',
+            title="Sales Data",
+        )
+
+        self.assertIn('"sql":"SELECT month, revenue\\nFROM sales\\nORDER BY month"', html)
+        self.assertNotIn('"{\\"sql\\":\\"SELECT month', html)
 
     def test_dashboard_multi_series_auto_detects_x_and_y_columns(self):
         html = self.render_dashboard_html(
@@ -145,6 +162,23 @@ class DashboardTableTest(unittest.TestCase):
         self.assertIn("title: {", html)
         self.assertIn("text: yAxisLabel", html)
         self.assertIn("y: yScaleOptions(yAxisLabel, textColor, gridColor)", html)
+
+    def test_y_axis_title_reserves_left_space_away_from_plot_area(self):
+        html = self.render_chart_html(
+            series=[
+                {"province": "江苏电网", "peak_gap": 4329.9},
+                {"province": "浙江电网", "peak_gap": 3600.0},
+            ],
+            chart_type="bar",
+            y_axis_unit="MW",
+            title="Peak Gap",
+        )
+
+        self.assertIn("afterFit: reserveYAxisTitleSpace", html)
+        self.assertIn("function reserveYAxisTitleSpace(scale)", html)
+        self.assertIn("scale.width = Math.max(scale.width, 58)", html)
+        self.assertIn("ticks: { color: textColor, font: {size:11}, padding: 8 }", html)
+        self.assertIn("padding: { top: 0, bottom: 12 }", html)
 
     def test_render_chart_combines_single_y_column_with_explicit_unit(self):
         html = self.render_chart_html(

@@ -8,13 +8,22 @@ required_open_webui_version: 0.9.5
 
 tool_instructions: |
   Arguments MUST be valid JSON objects.
-
-  Rules:
-  - Do NOT wrap arguments in XML.
-  - Do NOT HTML-escape quotes (no &quot;).
-  - Arrays and objects must be native JSON, not strings.
-  - Numbers must be numbers, not strings.
+  - Do NOT wrap arguments in XML. Do NOT HTML-escape quotes.
+  - Arrays/objects must be native JSON, not strings. Numbers must be numbers.
   - ALL parameters are direct values — no nested "data" wrapper.
+
+  Calling rules (every answer MUST follow this):
+  1. First call render_data_detail to show the source data.
+  2. Then call exactly ONE of render_chart / render_dashboard / render_analysis_dashboard.
+     Never call two dashboard functions (render_dashboard + render_analysis_dashboard) together.
+  3. In multi-turn conversations, every time a response performs data query and visualization,
+     repeat this sequence: render_data_detail first, then at most one visualization function.
+  4. Do not use render_analysis_dashboard for simple trend, bar, pie, table, or single-chart requests.
+  5. Always pass y_axis_label when the y-axis meaning is clear, e.g. "Revenue (USD)".
+     Always pass y_axis_unit when there is a single y-column with a known unit, e.g. "rpm".
+     These become the y-axis title text in the rendered chart.
+  6. After calling any tool function, only describe what the visualization shows.
+     Do NOT output HTML, CSS, SVG, or JavaScript.
 
   --- render_data_detail: SQL + explanation + data table preview ---
   {
@@ -30,8 +39,14 @@ tool_instructions: |
   }
   columns: list of column name strings (required).
   rows: list of row objects (required). Keys must match columns.
-  sql: raw SQL string (optional). Do NOT pass a JSON object.
-  sql_lines: SQL as list of lines (optional). Prefer this for complex multi-line SQL.
+  sql: raw SQL string (optional). Only for single-line SQL. Do NOT pass a JSON object.
+  sql_lines: SQL as list of lines (required for multi-line SQL). Safer than "sql"
+    because it avoids string-escaping instability. Example: ["SELECT a, b", "FROM t"].
+    Prefer sql_lines for any SQL spanning more than one line.
+  SQL few-shot:
+  - GOOD multi-line SQL: "sql_lines": ["SELECT month, revenue", "FROM sales", "ORDER BY month"]
+  - GOOD single-line SQL: "sql": "SELECT month, revenue FROM sales ORDER BY month"
+  - AVOID JSON-wrapped SQL: "sql": '{"sql":"SELECT month, revenue\\nFROM sales"}'
   explanation: plain text (optional). Max 2 sentences, ≤80 chars. No markdown, no HTML, no line breaks.
   SQL and explanation are collapsed by default — click to expand.
   title: shown in the toolbar (optional, defaults to "Data Detail").
@@ -67,10 +82,11 @@ tool_instructions: |
   series: list of objects (required). Each must have one x-axis key (string) plus ≥1 numeric columns.
   rows: alias for series when reusing render_data_detail rows.
   y_columns: which columns to plot (optional, auto-detected if omitted).
-  y_axis_label: complete y-axis label with unit, e.g. "Load (MW)".
-  y_axis_unit: y-axis unit suffix, e.g. "MW". With one y_column renders "column (unit)";
-    with multiple y_columns treated as shared unit for axis and legend-toggle title.
-    Never guess units from values.
+  y_axis_label: always pass when the y-axis meaning is clear, e.g. "Revenue (USD)" or "Load (MW)".
+    This becomes the y-axis title in the chart and ensures exported PNGs are self-documenting.
+  y_axis_unit: always pass when there is one y-column with a known unit, e.g. "rpm" or "MW".
+    Renders as "column (unit)". With multiple y_columns, only use a shared unit.
+    Never guess units from values — leave empty if unsure.
   chart_type: "line" | "bar" | "pie" | "table" (optional, defaults to "line").
   title: shown in the toolbar (optional, defaults to "Chart").
 
@@ -93,7 +109,7 @@ tool_instructions: |
   metrics: list of {label, value, delta?} objects (required).
   series: optional trend chart data. Same shape as render_chart series.
   y_columns: which numeric columns to plot (optional, auto-detected).
-  y_axis_label / y_axis_unit: same behavior as render_chart.
+  y_axis_label / y_axis_unit: same behavior as render_chart. Always pass when the meaning is clear.
   chart_title: label for the trend chart (optional).
   chart_type: "line" | "bar" | "pie" | "table" (optional, defaults to "line").
   title: shown in the toolbar (optional, defaults to "Dashboard").
@@ -215,7 +231,9 @@ def _coerce_sql_text(sql: Any = "", sql_lines: Any = None) -> str:
 
     if isinstance(source, list):
         return "\n".join(
-            str(part).strip() for part in source if str(part).strip()
+            part
+            for part in (_coerce_sql_text(part) for part in source)
+            if part
         ).strip()
 
     if isinstance(source, dict):
@@ -245,6 +263,9 @@ def _coerce_sql_text(sql: Any = "", sql_lines: Any = None) -> str:
         s.startswith("'") and s.endswith("'")
     ):
         s = s[1:-1].strip()
+
+    # Normalize literal escapes after JSON decoding, so JSON-wrapped SQL remains parseable.
+    s = s.replace("\\n", "\n").replace("\\t", "  ")
 
     return _strip_markdown_fence(s)
 
@@ -363,6 +384,8 @@ def _resolve_y_axis_label(
     explicit_unit = str(y_axis_unit or "").strip()
     if len(clean_columns) == 1:
         base_label = clean_columns[0]
+        if base_label == "value":
+            return ""
         if explicit_unit:
             return f"{base_label} ({explicit_unit})"
         return base_label
@@ -1103,17 +1126,23 @@ def _build_html(
     return axisMeta.label || '';
   }}
 
+  function reserveYAxisTitleSpace(scale) {{
+    if (!scale || !scale.options || !scale.options.title || !scale.options.title.display) return;
+    scale.width = Math.max(scale.width, 58);
+  }}
+
   function yScaleOptions(yAxisLabel, textColor, gridColor) {{
     return {{
       grid: {{ color: gridColor }},
-      ticks: {{ color: textColor, font: {{size:11}} }},
+      ticks: {{ color: textColor, font: {{size:11}}, padding: 8 }},
       border: {{ display: false }},
+      afterFit: reserveYAxisTitleSpace,
       title: {{
         display: !!yAxisLabel,
         text: yAxisLabel,
         color: textColor,
         font: {{ size: 11, weight: '600' }},
-        padding: {{ bottom: 6 }}
+        padding: {{ top: 0, bottom: 12 }}
       }}
     }};
   }}

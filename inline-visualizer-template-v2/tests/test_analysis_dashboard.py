@@ -91,9 +91,26 @@ class AnalysisDashboardTest(unittest.TestCase):
 
         self.assertIn("Arguments MUST be valid JSON", module.__doc__)
         self.assertIn("render_data_detail", module.__doc__)
+        self.assertIn("Then call exactly ONE of render_chart", module.__doc__)
+        self.assertIn("In multi-turn conversations", module.__doc__)
+        self.assertIn("every time a response performs data query and visualization", module.__doc__)
+        self.assertIn('no nested "data" wrapper', module.__doc__)
+        self.assertIn("Do not use render_analysis_dashboard for simple", module.__doc__)
+        self.assertIn("Do NOT output HTML, CSS, SVG, or JavaScript", module.__doc__)
         self.assertIn("y_axis_label", module.__doc__)
         self.assertIn("y_axis_unit", module.__doc__)
         self.assertIn("Never guess units from values", module.__doc__)
+
+    def test_sql_instructions_include_few_shot_examples(self):
+        module = load_tool_module()
+        skill = (Path(__file__).parent.parent / "SKILL.md").read_text(encoding="utf-8")
+
+        for text in (module.__doc__, skill):
+            self.assertIn("SQL few-shot", text)
+            self.assertIn("GOOD multi-line SQL", text)
+            self.assertIn('"sql_lines": ["SELECT month, revenue"', text)
+            self.assertIn("AVOID JSON-wrapped SQL", text)
+            self.assertIn('"sql": \'{"sql":"SELECT', text)
 
     def test_skill_limits_analysis_dashboard_to_explicit_multi_module_requests(self):
         skill = (Path(__file__).parent.parent / "SKILL.md").read_text(encoding="utf-8")

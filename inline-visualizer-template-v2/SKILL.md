@@ -1,5 +1,5 @@
 ---
-name: visual_template_v2
+name: inline-visualizer-template-v2
 description: 使用内置模板快速渲染 Open WebUI 内联可视化。四个自描述函数：render_data_detail（数据详情）、render_chart（图表）、render_dashboard（轻量仪表盘）、render_analysis_dashboard（综合分析看板）。模型传入扁平参数，Chart.js 渲染由工具内置完成。
 ---
 
@@ -12,9 +12,11 @@ description: 使用内置模板快速渲染 Open WebUI 内联可视化。四个�
 ### 调用顺序（不可违反）
 
 1. **所有可视化回答第一步 → `render_data_detail`**
-2. **再调用至多一个** `render_chart` / `render_dashboard` / `render_analysis_dashboard`
+2. **再调用恰好一个** `render_chart` / `render_dashboard` / `render_analysis_dashboard`
 3. 禁止跳过 `render_data_detail` 直接调用图表或看板
 4. 禁止在 `render_data_detail` 之后调用多个可视化函数
+5. **禁止同时调用两种 dashboard**（`render_dashboard` + `render_analysis_dashboard`），它们互斥
+6. **多轮对话中，每一次重新进行数据查询并可视化，都必须执行 `render_data_detail` → 恰好一个图表/看板函数**
 
 ### 函数选择
 
@@ -52,9 +54,14 @@ description: 使用内置模板快速渲染 Open WebUI 内联可视化。四个�
 SQL + 解释 + 数据表预览。`columns` 和 `rows` 必填。
 
 - `columns`：使用有意义的名称，这些名称将显示为表头
-- `sql`：原始 SQL 字符串，不要传 JSON 对象
-- `sql_lines`：复杂或多行 SQL 优先传这个，避免字符串转义不稳定
+- `sql`：单行 SQL 字符串，不要传 JSON 对象
+- `sql_lines`：多行 SQL 必须传这个，避免字符串转义不稳定。示例：`["SELECT a, b", "FROM t", "WHERE c=1"]`
 - `explanation`：最多 2 句话，不超过 80 字，不要用 markdown 或 HTML
+
+SQL few-shot:
+- GOOD multi-line SQL: `"sql_lines": ["SELECT month, revenue", "FROM sales", "ORDER BY month"]`
+- GOOD single-line SQL: `"sql": "SELECT month, revenue FROM sales ORDER BY month"`
+- AVOID JSON-wrapped SQL: `"sql": '{"sql":"SELECT month, revenue\\nFROM sales"}'`
 
 SQL 和 explanation 在页面中默认折叠。数据表超过 10 行自动分页。
 
