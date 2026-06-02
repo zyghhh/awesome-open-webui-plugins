@@ -215,6 +215,7 @@ class AnalysisDashboardTest(unittest.TestCase):
         self.assertIn('"y_axis_label":"Temperature (C)"', html)
         self.assertIn("var axisMeta = axisMetaFromData(block, yCols);", html)
         self.assertIn("var yAxisLabel = initialYAxisTitle(axisMeta, yCols);", html)
+        self.assertIn("layout: chartLayoutOptions(yAxisLabel, compact)", html)
         self.assertIn("y: yScaleOptions(yAxisLabel, textColor, gridColor)", html)
 
 

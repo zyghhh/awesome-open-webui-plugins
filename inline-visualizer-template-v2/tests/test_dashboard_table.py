@@ -179,6 +179,9 @@ class DashboardTableTest(unittest.TestCase):
         self.assertIn("scale.width = Math.max(scale.width, 58)", html)
         self.assertIn("ticks: { color: textColor, font: {size:11}, padding: 8 }", html)
         self.assertIn("padding: { top: 0, bottom: 12 }", html)
+        self.assertIn("function chartLayoutOptions(yAxisLabel, compact)", html)
+        self.assertIn("left: yAxisLabel ? (compact ? 10 : 14) : 8", html)
+        self.assertIn("layout: chartLayoutOptions(yAxisLabel, false)", html)
 
     def test_render_chart_combines_single_y_column_with_explicit_unit(self):
         html = self.render_chart_html(

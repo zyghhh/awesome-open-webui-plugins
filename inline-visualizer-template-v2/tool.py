@@ -1131,6 +1131,17 @@ def _build_html(
     scale.width = Math.max(scale.width, 58);
   }}
 
+  function chartLayoutOptions(yAxisLabel, compact) {{
+    return {{
+      padding: {{
+        left: yAxisLabel ? (compact ? 10 : 14) : 8,
+        right: compact ? 4 : 8,
+        top: 0,
+        bottom: 0
+      }}
+    }};
+  }}
+
   function yScaleOptions(yAxisLabel, textColor, gridColor) {{
     return {{
       grid: {{ color: gridColor }},
@@ -1391,6 +1402,7 @@ def _build_html(
         options: {{
           responsive: true,
           maintainAspectRatio: false,
+          layout: chartLayoutOptions(yAxisLabel, false),
           plugins: {{
             legend: isMulti ? legendConfigWithYAxisSync('bar', 'multi', axisMeta) : {{ display: false }},
             tooltip: {{ backgroundColor: getCssVar('--color-bg-secondary'), titleColor: textColor, bodyColor: textColor, borderColor: gridColor, borderWidth: 0.5 }}
@@ -1408,6 +1420,7 @@ def _build_html(
         options: {{
           responsive: true,
           maintainAspectRatio: false,
+          layout: chartLayoutOptions(yAxisLabel, false),
           interaction: {{ intersect: false, mode: 'index' }},
           plugins: {{
             legend: isMulti ? legendConfigWithYAxisSync('line', 'multi', axisMeta) : {{ display: false }},
@@ -1550,6 +1563,7 @@ def _build_html(
           data: {{ labels: labels, datasets: datasets }},
           options: {{
             responsive: true, maintainAspectRatio: false,
+            layout: chartLayoutOptions(dashYAxisLabel, false),
             plugins: {{
               legend: dashMulti ? legendConfigWithYAxisSync('bar', 'multi', dashAxisMeta) : {{ display: false }},
               tooltip: {{ backgroundColor: getCssVar('--color-bg-secondary'), titleColor: textColor, bodyColor: textColor, borderColor: gridColor, borderWidth: 0.5 }}
@@ -1563,6 +1577,7 @@ def _build_html(
           data: {{ labels: labels, datasets: datasets }},
           options: {{
             responsive: true, maintainAspectRatio: false,
+            layout: chartLayoutOptions(dashYAxisLabel, false),
             interaction: {{ intersect: false, mode: 'index' }},
             plugins: {{
               legend: dashMulti ? legendConfigWithYAxisSync('line', 'multi', dashAxisMeta) : {{ display: false }},
@@ -1635,6 +1650,7 @@ def _build_html(
       options: {{
         responsive: true,
         maintainAspectRatio: false,
+        layout: chartLayoutOptions(yAxisLabel, compact),
         interaction: {{ intersect: false, mode: 'index' }},
         plugins: {{
           legend: isMulti ? legendConfigWithYAxisSync(chartType, 'multi', axisMeta) : {{ display: false }},
