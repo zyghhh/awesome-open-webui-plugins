@@ -4,7 +4,7 @@ from pathlib import Path
 import sys
 import unittest
 
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from test_dashboard_table import load_tool_module
 
@@ -78,7 +78,7 @@ class AnalysisDashboardTest(unittest.TestCase):
         self.assertNotIn('"summaryCards"', html)
 
     def test_skill_keeps_data_detail_as_source_of_record(self):
-        skill = __import__("pathlib").Path(__file__).with_name("SKILL.md").read_text(encoding="utf-8")
+        skill = (Path(__file__).parent.parent / "SKILL.md").read_text(encoding="utf-8")
 
         self.assertIn("render_data_detail", skill)
         self.assertIn("数据来源", skill)
@@ -103,11 +103,13 @@ class AnalysisDashboardTest(unittest.TestCase):
         self.assertIn("Never guess units from values", module.__doc__)
 
     def test_skill_limits_analysis_dashboard_to_explicit_multi_module_requests(self):
-        skill = __import__("pathlib").Path(__file__).with_name("SKILL.md").read_text(encoding="utf-8")
+        skill = (Path(__file__).parent.parent / "SKILL.md").read_text(encoding="utf-8")
 
         self.assertIn("不要因为必须先展示数据详情表，就自动选择综合分析看板", skill)
         self.assertIn("普通单图、趋势、柱状、饼图或表格请求必须优先使用 `render_chart`", skill)
         self.assertIn("只有当用户明确要求综合分析、监控看板、诊断、多角度展示", skill)
+        self.assertIn("这个限制只适用于可视化模板函数", skill)
+        self.assertIn("不限制 SQL、数据库、检索、诊断类工具调用", skill)
         self.assertNotIn("关键明细", skill)
         self.assertNotIn("| 任何可视化请求 |", skill)
 

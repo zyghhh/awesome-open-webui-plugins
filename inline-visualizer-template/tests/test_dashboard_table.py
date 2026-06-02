@@ -6,7 +6,7 @@ import types
 import unittest
 
 
-TOOL_PATH = Path(__file__).with_name("tool.py")
+TOOL_PATH = Path(__file__).parent.parent / "tool.py"
 
 
 def load_tool_module():

@@ -13,7 +13,7 @@ description: 使用内置模板快速渲染 Open WebUI 内联可视化。四个�
 
 **数据详情表必须先展示。** 每个包含可视化的回答都必须先调用 `render_data_detail` 展示源数据表；然后才允许再调用至多一个 `render_chart` / `render_dashboard` / `render_analysis_dashboard`。不要直接调用图表或看板。不要因为必须先展示数据详情表，就自动选择综合分析看板。
 
-同一个回答中除 `render_data_detail` 外，**最多再调用一次可视化函数**。相关数据合并展示，不要拆成多个孤立的单图。
+同一个回答中除 `render_data_detail` 外，**最多再调用一次可视化函数**。这个限制只适用于可视化模板函数（`render_chart` / `render_dashboard` / `render_analysis_dashboard`），不限制 SQL、数据库、检索、诊断类工具调用。相关数据合并展示，不要拆成多个孤立的单图。
 
 | 数据特征 | 合并策略 |
 |---------|---------|
@@ -31,7 +31,7 @@ description: 使用内置模板快速渲染 Open WebUI 内联可视化。四个�
 3. 用户要求 KPI/概览/多个指标 → 再调用 `render_dashboard`（仅调用一次）
 4. 只有当用户明确要求综合分析、监控看板、诊断、多角度展示，或需要主图 + 排名/辅助图/摘要卡片等 3 个以上语义模块时，才调用 `render_analysis_dashboard`（仅调用一次）
 5. 不允许跳过 `render_data_detail` 直接调用图表或看板
-6. 调用后只用自然语言简要说明结果
+6. 只有在查询已完成且数据已正确展示后，才用自然语言简要说明结果；如果查询仍未完成，继续查询或说明具体阻塞原因。
 7. 不要输出 `@@@VIZ-START`、HTML、CSS、SVG、JavaScript、代码块
 
 ## 适用场景
@@ -62,6 +62,7 @@ SQL + 解释 + 数据表预览。`columns` 和 `rows` 必填，`sql` 和 `explan
 
 - `columns`：列名数组。**使用有意义的名称**，这些名称将显示为表头。
 - `sql`：原始 SQL 查询字符串，可选。不要传 JSON 对象。
+- `sql_lines`：SQL 行数组，可选。复杂或多行 SQL 优先传这个，避免模型生成工具参数时字符串转义不稳定。
 - `explanation`：纯文本解释，**最多 2 句话，不超过 80 字**。不要用 markdown、HTML 或换行。
 
 ```json
@@ -73,6 +74,7 @@ SQL + 解释 + 数据表预览。`columns` 和 `rows` 必填，`sql` 和 `explan
     {"month": "Mar", "revenue": 132, "growth": "+5%"}
   ],
   "sql": "SELECT month, revenue FROM sales ORDER BY month",
+  "sql_lines": ["SELECT month, revenue", "FROM sales", "ORDER BY month"],
   "explanation": "按月汇总收入，展示Q1收入趋势。",
   "title": "Sales Data"
 }
@@ -119,7 +121,7 @@ SQL 和 explanation 在页面中**默认折叠**，点击展开。数据表始�
 - 多列时 line 渲染多条线、bar 渲染分组柱状，自动显示图例
 - pie 只使用第一个 y_column
 - `y_axis_label`：可选，完整 y 轴名称和单位，如 `"Revenue (USD)"`。需要导出图片可独立理解时优先传这个。
-- `y_axis_unit`：可选，只能在单个 y_column 且单位明确时使用，如 `"rpm"`；多 y_column 不要用它自动套单位，避免单位错误。
+- `y_axis_unit`：可选，y 轴单位，如 `"rpm"`。单个 y_column 会显示为 `列名 (单位)`；多个 y_column 只有在所有指标共享同一单位时才使用，图例开关后左侧标题会随可见指标更新。
 - 单位不能从数据值猜测；如果不确定单位，不要填单位，只填准确的列名/指标名。
 
 `chart_type` 选项：

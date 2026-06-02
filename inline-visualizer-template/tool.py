@@ -37,12 +37,14 @@ tool_instructions: |
       {"month": "Feb", "revenue": 148, "growth": "+12%"}
     ],
     "sql": "SELECT month, revenue FROM sales ORDER BY month",
+    "sql_lines": ["SELECT month, revenue", "FROM sales", "ORDER BY month"],
     "explanation": "Monthly revenue trend for Q1 2025.",
     "title": "Sales Data"
   }
   columns: list of column name strings (required).
   rows: list of row objects (required). Keys must match columns.
-  sql: raw SQL string (optional). Do NOT pass a JSON object — must be a plain string.
+  sql: raw SQL string (optional). Do NOT pass a JSON object.
+  sql_lines: SQL as a list of lines (optional). Prefer this for complex or multi-line SQL.
   explanation: plain text (optional). Max 2 sentences, ≤80 chars. No markdown, no HTML, no line breaks.
   SQL and explanation are collapsed by default — click to expand.
   title: shown in the toolbar (optional, defaults to "Data Detail").
@@ -83,8 +85,9 @@ tool_instructions: |
   y_columns: which columns to plot on y-axis (optional). Auto-detected if omitted.
   y_axis_label: complete y-axis label, including unit when needed, e.g. "Load (MW)".
     Prefer this when the exported PNG must be understandable on its own.
-  y_axis_unit: unit for exactly one y-axis column, e.g. "MW". Ignored for multiple
-    y_columns to avoid incorrect units. Never guess units from values.
+  y_axis_unit: unit for the y-axis, e.g. "MW". With one y_column it renders
+    as "column (unit)"; with multiple y_columns it is treated as a shared unit
+    for the axis and legend-toggle title updates. Never guess units from values.
   chart_type: "line" | "bar" | "pie" | "table" (optional, defaults to "line").
   title: shown in the toolbar (optional, defaults to "Chart").
 
@@ -113,8 +116,9 @@ tool_instructions: |
     and multi-series (list of objects with x-axis key + multiple numeric columns).
   y_columns: which numeric columns to plot for multi-series (optional, auto-detected if omitted).
   y_axis_label: complete y-axis label for the trend chart, including unit when needed.
-  y_axis_unit: unit for exactly one y-axis column. Ignored for multiple y_columns
-    to avoid incorrect units. Never guess units from values.
+  y_axis_unit: unit for the y-axis. With one y_column it renders as
+    "column (unit)"; with multiple y_columns it is treated as a shared unit
+    for the axis and legend-toggle title updates. Never guess units from values.
   chart_title: label for the trend chart (optional).
   chart_type: "line" | "bar" | "pie" | "table" for the trend chart (optional, defaults to "line").
   title: shown in the toolbar (optional, defaults to "Dashboard").
@@ -230,6 +234,60 @@ def _coerce_dict(value: Any) -> Any:
     return value
 
 
+def _strip_markdown_fence(value: str) -> str:
+    s = value.strip()
+    if not s.startswith("```") or not s.endswith("```"):
+        return s
+    lines = s.splitlines()
+    if len(lines) < 2:
+        return s
+    if lines[0].strip().startswith("```") and lines[-1].strip() == "```":
+        return "\n".join(lines[1:-1]).strip()
+    return s
+
+
+def _coerce_sql_text(sql: Any = "", sql_lines: Any = None) -> str:
+    """Normalize common tool-call SQL shapes into plain text for display."""
+    source = sql_lines if sql_lines is not None else sql
+    if source is None:
+        return ""
+
+    if isinstance(source, list):
+        return "\n".join(
+            str(part).strip() for part in source if str(part).strip()
+        ).strip()
+
+    if isinstance(source, dict):
+        for key in ("sql", "query", "statement", "text"):
+            if key in source:
+                return _coerce_sql_text(source.get(key))
+        return ""
+
+    s = html.unescape(str(source).strip())
+    if not s:
+        return ""
+
+    parsed = None
+    if (
+        (s.startswith('"') and s.endswith('"'))
+        or (s.startswith("[") and s.endswith("]"))
+        or (s.startswith("{") and s.endswith("}"))
+    ):
+        try:
+            parsed = json.loads(s)
+        except Exception:
+            parsed = None
+    if parsed is not None:
+        return _coerce_sql_text(parsed)
+
+    if (s.startswith('"') and s.endswith('"')) or (
+        s.startswith("'") and s.endswith("'")
+    ):
+        s = s[1:-1].strip()
+
+    return _strip_markdown_fence(s)
+
+
 def _coerce_str_list(value: Any) -> List[str]:
     v = _coerce_list(value)
     if isinstance(v, list):
@@ -257,7 +315,11 @@ def _normalize_series_block(block: Any, *, name: str) -> Any:
             return f"Error: {name}.series[{i}] must be an object."
         clean.append(dict(item))
 
-    coerced_y = _coerce_list(block.get("y_columns")) if block.get("y_columns") is not None else None
+    coerced_y = (
+        _coerce_list(block.get("y_columns"))
+        if block.get("y_columns") is not None
+        else None
+    )
     if coerced_y and isinstance(coerced_y, list) and len(coerced_y) > 0:
         y_cols = [str(c) for c in coerced_y]
     elif all("value" in item for item in clean):
@@ -265,7 +327,8 @@ def _normalize_series_block(block: Any, *, name: str) -> Any:
     else:
         first = clean[0]
         y_cols = [
-            k for k in first.keys()
+            k
+            for k in first.keys()
             if isinstance(first[k], (int, float)) and not isinstance(first[k], bool)
         ]
         if not y_cols:
@@ -310,6 +373,10 @@ def _normalize_series_block(block: Any, *, name: str) -> Any:
         y_axis_unit=str(block.get("y_axis_unit") or ""),
         chart_type=chart_type,
     )
+    normalized["y_axis_label_source"] = _resolve_y_axis_label_source(
+        block.get("y_axis_label")
+    )
+    normalized["y_axis_unit"] = str(block.get("y_axis_unit") or "").strip()
     return normalized
 
 
@@ -332,12 +399,18 @@ def _resolve_y_axis_label(
     if not clean_columns:
         return ""
 
-    base_label = clean_columns[0] if len(clean_columns) == 1 else ", ".join(clean_columns)
     explicit_unit = str(y_axis_unit or "").strip()
-    if explicit_unit and len(clean_columns) == 1:
-        return f"{base_label} ({explicit_unit})"
+    if len(clean_columns) == 1:
+        base_label = clean_columns[0]
+        if explicit_unit:
+            return f"{base_label} ({explicit_unit})"
+        return base_label
 
-    return base_label
+    return ""
+
+
+def _resolve_y_axis_label_source(y_axis_label: Any) -> str:
+    return "explicit" if str(y_axis_label or "").strip() else "auto"
 
 
 # ---------------------------------------------------------------------------
@@ -684,15 +757,16 @@ select { max-width: 118px; }
 .analysis-small-chart { position: relative; height: 120px; }
 .ranking-row {
   display: grid;
-  grid-template-columns: minmax(54px, 120px) 1fr minmax(62px, auto);
-  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 10px;
   align-items: center;
-  margin: 6px 0;
+  margin: 8px 0;
   font-size: 12px;
 }
+.ranking-meta { display: contents; }
 .ranking-label { color: var(--color-text-primary); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ranking-track { height: 10px; border-radius: 999px; background: var(--color-bg-tertiary); overflow: hidden; }
-.ranking-bar { height: 100%; border-radius: 999px; background: var(--accent); }
+.ranking-track { grid-column: 1 / -1; width: 100%; height: 10px; border-radius: 999px; background: var(--color-bg-tertiary); overflow: hidden; }
+.ranking-bar { height: 100%; min-width: 10px; border-radius: 999px; background: var(--accent); }
 .ranking-value { color: var(--color-text-primary); font-weight: 600; text-align: right; white-space: nowrap; }
 .analysis-cards {
   display: grid;
@@ -987,6 +1061,41 @@ def _build_html(
     return base;
   }}
 
+  function unitSuffix(unit) {{
+    return unit ? ' (' + unit + ')' : '';
+  }}
+
+  function visibleYAxisTitle(chart, axisMeta) {{
+    axisMeta = axisMeta || {{}};
+    if (!chart || !chart.data || !Array.isArray(chart.data.datasets)) return '';
+    var visible = [];
+    chart.data.datasets.forEach(function(dataset, i) {{
+      if (chart.isDatasetVisible(i)) visible.push(String(dataset.label || ''));
+    }});
+    if (visible.length === 0) return '';
+    if (visible.length === 1) return visible[0] + unitSuffix(axisMeta.unit);
+    if (visible.length > 1 && axisMeta.source === 'explicit') return axisMeta.label;
+    return axisMeta.unit || '';
+  }}
+
+  function updateYAxisTitleForVisibleDatasets(chart, axisMeta) {{
+    if (!chart || !chart.options || !chart.options.scales || !chart.options.scales.y) return;
+    var text = visibleYAxisTitle(chart, axisMeta);
+    chart.options.scales.y.title = chart.options.scales.y.title || {{}};
+    chart.options.scales.y.title.display = !!text;
+    chart.options.scales.y.title.text = text;
+    chart.update();
+  }}
+
+  function legendConfigWithYAxisSync(chartType, context, axisMeta) {{
+    var base = buildLegendConfig(chartType, context);
+    base.onClick = function(e, legendItem, legend) {{
+      Chart.defaults.plugins.legend.onClick.call(this, e, legendItem, legend);
+      updateYAxisTitleForVisibleDatasets(legend.chart, axisMeta);
+    }};
+    return base;
+  }}
+
   function buildChartDatasets(series, yCols, isMulti, chartType, pointRadius, pointHoverRadius, bgColor) {{
     return yCols.map(function(col, i) {{
       var color = COLORS[i % COLORS.length];
@@ -1014,6 +1123,23 @@ def _build_html(
     if (data && typeof data.y_axis_label === 'string') return data.y_axis_label.trim();
     if (!Array.isArray(yCols) || yCols.length === 0) return '';
     return yCols.map(function(col) {{ return String(col); }}).join(', ');
+  }}
+
+  function axisMetaFromData(data, yCols) {{
+    return {{
+      label: axisTitleFromData(data, yCols),
+      source: data && data.y_axis_label_source ? String(data.y_axis_label_source) : 'auto',
+      unit: data && data.y_axis_unit ? String(data.y_axis_unit) : ''
+    }};
+  }}
+
+  function initialYAxisTitle(axisMeta, yCols) {{
+    axisMeta = axisMeta || {{}};
+    if (Array.isArray(yCols) && yCols.length > 1) {{
+      if (axisMeta.source === 'explicit') return axisMeta.label || '';
+      return axisMeta.unit || '';
+    }}
+    return axisMeta.label || '';
   }}
 
   function yScaleOptions(yAxisLabel, textColor, gridColor) {{
@@ -1241,7 +1367,8 @@ def _build_html(
     var gridColor = getCssVar('--color-border-tertiary');
     var bgColor = getCssVar('--color-bg-primary');
     var datasets = buildChartDatasets(series, yCols, isMulti, chartType, 4, 6, bgColor);
-    var yAxisLabel = axisTitleFromData(data, yCols);
+    var axisMeta = axisMetaFromData(data, yCols);
+    var yAxisLabel = initialYAxisTitle(axisMeta, yCols);
 
     if (chartType === 'pie') {{
       // Pie only uses first y_column (single ring)
@@ -1275,7 +1402,7 @@ def _build_html(
           responsive: true,
           maintainAspectRatio: false,
           plugins: {{
-            legend: isMulti ? buildLegendConfig('bar', 'multi') : {{ display: false }},
+            legend: isMulti ? legendConfigWithYAxisSync('bar', 'multi', axisMeta) : {{ display: false }},
             tooltip: {{ backgroundColor: getCssVar('--color-bg-secondary'), titleColor: textColor, bodyColor: textColor, borderColor: gridColor, borderWidth: 0.5 }}
           }},
           scales: {{
@@ -1293,7 +1420,7 @@ def _build_html(
           maintainAspectRatio: false,
           interaction: {{ intersect: false, mode: 'index' }},
           plugins: {{
-            legend: isMulti ? buildLegendConfig('line', 'multi') : {{ display: false }},
+            legend: isMulti ? legendConfigWithYAxisSync('line', 'multi', axisMeta) : {{ display: false }},
             tooltip: {{ backgroundColor: getCssVar('--color-bg-secondary'), titleColor: textColor, bodyColor: textColor, borderColor: gridColor, borderWidth: 0.5 }}
           }},
           scales: {{
@@ -1412,7 +1539,8 @@ def _build_html(
       var bgColor = getCssVar('--color-bg-primary');
 
       var datasets = buildChartDatasets(series, dashYCols, dashMulti, chartType, 3, 5, bgColor);
-      var dashYAxisLabel = axisTitleFromData(data, dashYCols);
+      var dashAxisMeta = axisMetaFromData(data, dashYCols);
+      var dashYAxisLabel = initialYAxisTitle(dashAxisMeta, dashYCols);
 
       if (chartType === 'pie') {{
         currentChart = new Chart(ctx, {{
@@ -1433,7 +1561,7 @@ def _build_html(
           options: {{
             responsive: true, maintainAspectRatio: false,
             plugins: {{
-              legend: dashMulti ? buildLegendConfig('bar', 'multi') : {{ display: false }},
+              legend: dashMulti ? legendConfigWithYAxisSync('bar', 'multi', dashAxisMeta) : {{ display: false }},
               tooltip: {{ backgroundColor: getCssVar('--color-bg-secondary'), titleColor: textColor, bodyColor: textColor, borderColor: gridColor, borderWidth: 0.5 }}
             }},
             scales: {{ x: {{ grid: {{display:false}}, ticks: {{color:textColor,font:{{size:11}}}}, border: {{color:gridColor}} }}, y: yScaleOptions(dashYAxisLabel, textColor, gridColor) }}
@@ -1447,7 +1575,7 @@ def _build_html(
             responsive: true, maintainAspectRatio: false,
             interaction: {{ intersect: false, mode: 'index' }},
             plugins: {{
-              legend: dashMulti ? buildLegendConfig('line', 'multi') : {{ display: false }},
+              legend: dashMulti ? legendConfigWithYAxisSync('line', 'multi', dashAxisMeta) : {{ display: false }},
               tooltip: {{ backgroundColor: getCssVar('--color-bg-secondary'), titleColor: textColor, bodyColor: textColor, borderColor: gridColor, borderWidth: 0.5 }}
             }},
             scales: {{ x: {{ grid: {{display:false}}, ticks: {{color:textColor,font:{{size:11}},maxRotation:45}}, border: {{color:gridColor}} }}, y: yScaleOptions(dashYAxisLabel, textColor, gridColor) }}
@@ -1459,20 +1587,28 @@ def _build_html(
 
   function renderAnalysisRankings(rankings) {{
     var items = rankings.items || [];
+    function rankingNum(v) {{
+      var n = Number(v);
+      if (isFinite(n)) return n;
+      var m = String(v == null ? '' : v).replace(/,/g, '').match(/-?\\d+(?:\\.\\d+)?/);
+      return m ? Number(m[0]) : 0;
+    }}
     var maxValue = 0;
     items.forEach(function(item) {{
-      maxValue = Math.max(maxValue, Math.abs(num(item.value)));
+      maxValue = Math.max(maxValue, Math.abs(rankingNum(item.value)));
     }});
     if (!maxValue) maxValue = 1;
     var html = '<div class="analysis-panel"><div class="analysis-panel-title">' + esc(rankings.title || 'Ranking') + '</div>';
     items.slice(0, 8).forEach(function(item, i) {{
-      var value = num(item.value);
+      var value = rankingNum(item.value);
       var pct = Math.max(2, Math.min(100, Math.abs(value) / maxValue * 100));
       var color = COLORS[i % COLORS.length];
       html += '<div class="ranking-row">';
+      html += '<div class="ranking-meta">';
       html += '<div class="ranking-label">' + esc(item.label) + '</div>';
-      html += '<div class="ranking-track"><div class="ranking-bar" style="width:' + pct.toFixed(1) + '%;background:' + color + '"></div></div>';
       html += '<div class="ranking-value">' + esc(item.value) + (item.unit ? ' ' + esc(item.unit) : '') + '</div>';
+      html += '</div>';
+      html += '<div class="ranking-track"><div class="ranking-bar" style="width:' + pct.toFixed(1) + '%;background:' + color + '"></div></div>';
       html += '</div>';
     }});
     html += '</div>';
@@ -1491,7 +1627,8 @@ def _build_html(
     var gridColor = getCssVar('--color-border-tertiary');
     var bgColor = getCssVar('--color-bg-primary');
     var datasets = buildChartDatasets(series, yCols, isMulti, chartType, compact ? 2 : 3, compact ? 4 : 5, bgColor);
-    var yAxisLabel = axisTitleFromData(block, yCols);
+    var axisMeta = axisMetaFromData(block, yCols);
+    var yAxisLabel = initialYAxisTitle(axisMeta, yCols);
 
     if (chartType === 'pie') {{
       new Chart(ctx, {{
@@ -1510,7 +1647,7 @@ def _build_html(
         maintainAspectRatio: false,
         interaction: {{ intersect: false, mode: 'index' }},
         plugins: {{
-          legend: isMulti ? buildLegendConfig(chartType, 'multi') : {{ display: false }},
+          legend: isMulti ? legendConfigWithYAxisSync(chartType, 'multi', axisMeta) : {{ display: false }},
           tooltip: {{ backgroundColor: getCssVar('--color-bg-secondary'), titleColor: textColor, bodyColor: textColor, borderColor: gridColor, borderWidth: 0.5 }}
         }},
         scales: {{
@@ -1825,17 +1962,13 @@ def _render_response(
         "buildMs": (time.perf_counter() - started) * 1000,
     }
     for _ in range(3):
-        rendered = content.replace(
-            "__SERVER_STATS__", _json_for_script(server_stats)
-        )
+        rendered = content.replace("__SERVER_STATS__", _json_for_script(server_stats))
         if server_stats["htmlLength"] == len(rendered):
             content = rendered
             break
         server_stats["htmlLength"] = len(rendered)
     else:
-        content = content.replace(
-            "__SERVER_STATS__", _json_for_script(server_stats)
-        )
+        content = content.replace("__SERVER_STATS__", _json_for_script(server_stats))
 
     point_count = (
         len(data.get("series", data.get("rows", data.get("metrics", []))))
@@ -1847,7 +1980,10 @@ def _render_response(
         f"(template={template}, chart_type={chart_type}). "
         f"Do not emit HTML after this tool call. Summarize what the visualization shows."
     )
-    return HTMLResponse(content=content, headers={"Content-Disposition": "inline"}), context
+    return (
+        HTMLResponse(content=content, headers={"Content-Disposition": "inline"}),
+        context,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1875,7 +2011,8 @@ class Tools:
         self,
         columns: Any,
         rows: Any,
-        sql: str = "",
+        sql: Any = "",
+        sql_lines: Any = None,
         explanation: str = "",
         title: str = "Data Detail",
     ) -> tuple:
@@ -1889,6 +2026,7 @@ class Tools:
         :param columns: List of column name strings, e.g. ["month", "revenue"].
         :param rows: List of row objects, e.g. [{"month": "Jan", "revenue": 120}].
         :param sql: Optional SQL query string to display.
+        :param sql_lines: Optional SQL lines. Prefer this for complex multi-line SQL.
         :param explanation: Optional plain-text explanation of the data.
         :param title: Short title displayed in the toolbar.
         :return: Inline HTML visualization.
@@ -1918,7 +2056,7 @@ class Tools:
         data = {
             "columns": coerced_cols,
             "rows": coerced_rows,
-            "sql": str(sql).strip() if sql else "",
+            "sql": _coerce_sql_text(sql, sql_lines),
             "explanation": str(explanation).strip() if explanation else "",
         }
 
@@ -1974,8 +2112,8 @@ class Tools:
             numeric columns except "label".
         :param y_axis_label: Optional complete y-axis label, including unit when
             needed, e.g. "Revenue (USD)". Highest priority and never modified.
-        :param y_axis_unit: Optional unit for exactly one y-column, e.g. "rpm".
-            Ignored for multi-series charts to avoid incorrect unit display.
+        :param y_axis_unit: Optional y-axis unit, e.g. "rpm". For multiple
+            y-columns, use only when all series share that unit.
         :param rows: Compatibility alias for series when reusing data-detail rows.
         :param title: Short title displayed in the toolbar.
         :return: Inline HTML visualization with Chart.js rendering.
@@ -2016,14 +2154,15 @@ class Tools:
             # Auto-detect: all numeric keys (int/float, not bool)
             first = clean[0]
             resolved_y = [
-                k for k in first.keys()
+                k
+                for k in first.keys()
                 if isinstance(first[k], (int, float)) and not isinstance(first[k], bool)
             ]
             if not resolved_y:
                 return (
                     "Error: no numeric value columns found in series. "
                     "Each item must have at least one numeric field. "
-                    f'Got keys: {list(first.keys())}. '
+                    f"Got keys: {list(first.keys())}. "
                     'Example: {"month": "Jan", "revenue": 120, "users": 500}'
                 )
 
@@ -2069,6 +2208,8 @@ class Tools:
             y_axis_unit=y_axis_unit,
             chart_type=chart_type,
         )
+        data["y_axis_label_source"] = _resolve_y_axis_label_source(y_axis_label)
+        data["y_axis_unit"] = str(y_axis_unit or "").strip()
 
         # For table chart_type, auto-detect x-column from keys
         if chart_type == "table":
@@ -2121,8 +2262,8 @@ class Tools:
             If omitted, auto-detected from numeric fields.
         :param y_axis_label: Optional complete y-axis label for the trend chart,
             including unit when needed, e.g. "Requests (rpm)".
-        :param y_axis_unit: Optional trend chart unit for exactly one y-column.
-            Ignored for multi-series trend charts to avoid incorrect units.
+        :param y_axis_unit: Optional trend chart unit. For multiple y-columns,
+            use only when all series share that unit.
         :param title: Short title displayed in the toolbar.
         :return: Inline HTML visualization with metric cards and Chart.js chart.
         """
@@ -2146,14 +2287,16 @@ class Tools:
                 return (
                     f"Error: metrics[{i}] missing required fields. "
                     f'Each metric must have "label" and "value". '
-                    f'Got keys: {list(m.keys())}. '
+                    f"Got keys: {list(m.keys())}. "
                     f'Example: {{"label": "Revenue", "value": "$3.87M", "delta": "+12.4%"}}'
                 )
-            clean_metrics.append({
-                "label": str(m["label"]),
-                "value": m["value"],
-                "delta": str(m.get("delta", "")),
-            })
+            clean_metrics.append(
+                {
+                    "label": str(m["label"]),
+                    "value": m["value"],
+                    "delta": str(m.get("delta", "")),
+                }
+            )
 
         data: Dict[str, Any] = {
             "metrics": clean_metrics,
@@ -2178,9 +2321,7 @@ class Tools:
                     clean.append(dict(item))
 
                 if not clean:
-                    return (
-                        "Error: 'series' must contain at least one valid object."
-                    )
+                    return "Error: 'series' must contain at least one valid object."
 
                 # Resolve y_columns: explicit > "value" key detection > auto-detect numerics
                 coerced_y = _coerce_list(y_columns) if y_columns is not None else None
@@ -2193,8 +2334,10 @@ class Tools:
                     # Auto-detect: all numeric keys (int/float, not bool)
                     first = clean[0]
                     dash_y_cols = [
-                        k for k in first.keys()
-                        if isinstance(first[k], (int, float)) and not isinstance(first[k], bool)
+                        k
+                        for k in first.keys()
+                        if isinstance(first[k], (int, float))
+                        and not isinstance(first[k], bool)
                     ]
                     if not dash_y_cols:
                         return (
@@ -2237,6 +2380,8 @@ class Tools:
                     y_axis_unit=y_axis_unit,
                     chart_type=chart_type,
                 )
+                data["y_axis_label_source"] = _resolve_y_axis_label_source(y_axis_label)
+                data["y_axis_unit"] = str(y_axis_unit or "").strip()
 
         metric_count = len(clean_metrics)
         return _render_response(
@@ -2300,13 +2445,19 @@ class Tools:
             clean_items: List[Dict[str, Any]] = []
             for i, item in enumerate(items):
                 item = _coerce_dict(item)
-                if not isinstance(item, dict) or "label" not in item or "value" not in item:
+                if (
+                    not isinstance(item, dict)
+                    or "label" not in item
+                    or "value" not in item
+                ):
                     return f"Error: rankings.items[{i}] must have label and value."
-                clean_items.append({
-                    "label": str(item["label"]),
-                    "value": item["value"],
-                    "unit": str(item.get("unit", "")),
-                })
+                clean_items.append(
+                    {
+                        "label": str(item["label"]),
+                        "value": item["value"],
+                        "unit": str(item.get("unit", "")),
+                    }
+                )
             data["rankings"] = {
                 "title": str(rankings_obj.get("title") or "Ranking"),
                 "items": clean_items,
@@ -2332,13 +2483,19 @@ class Tools:
             clean_cards: List[Dict[str, Any]] = []
             for i, card in enumerate(cards):
                 card = _coerce_dict(card)
-                if not isinstance(card, dict) or "label" not in card or "value" not in card:
+                if (
+                    not isinstance(card, dict)
+                    or "label" not in card
+                    or "value" not in card
+                ):
                     return f"Error: summary_cards[{i}] must have label and value."
-                clean_cards.append({
-                    "label": str(card["label"]),
-                    "value": card["value"],
-                    "delta": str(card.get("delta", "")),
-                })
+                clean_cards.append(
+                    {
+                        "label": str(card["label"]),
+                        "value": card["value"],
+                        "delta": str(card.get("delta", "")),
+                    }
+                )
             if clean_cards:
                 data["summaryCards"] = clean_cards
 

@@ -37,6 +37,7 @@ SQL + 解释 + 数据表预览。
 | `columns` | `list[str]` | 是 | 列名字符串数组 |
 | `rows` | `list[dict]` | 是 | 行数据对象数组 |
 | `sql` | `str` | 否 | SQL 查询字符串 |
+| `sql_lines` | `list[str]` | 否 | SQL 行数组；复杂或多行 SQL 推荐使用，比整段字符串更稳定 |
 | `explanation` | `str` | 否 | 纯文本解释 |
 | `title` | `str` | 否 | 标题，默认 "Data Detail" |
 
@@ -50,7 +51,7 @@ SQL + 解释 + 数据表预览。
 | `chart_type` | `"line" \| "bar" \| "pie" \| "table"` | 否 | 图表类型，默认 "line" |
 | `y_columns` | `list[str]` | 否 | 指定绘图数值列；不传时优先使用 `value`，否则自动检测数值列。`pie` 只使用第一个数值列 |
 | `y_axis_label` | `str` | 否 | 完整 y 轴名称和单位，如 `"Revenue (USD)"`；优先级最高，导出 PNG 会包含 |
-| `y_axis_unit` | `str` | 否 | 单 y 列图表的单位，如 `"rpm"`；多 y 列时不会自动套用，避免单位错误 |
+| `y_axis_unit` | `str` | 否 | y 轴单位，如 `"rpm"`；单 y 列显示为 `列名 (单位)`，多 y 列仅在所有指标共享同一单位时使用 |
 | `title` | `str` | 否 | 标题，默认 "Chart" |
 
 ### render_dashboard
@@ -65,10 +66,10 @@ SQL + 解释 + 数据表预览。
 | `chart_type` | `"line" \| "bar" \| "pie" \| "table"` | 否 | 趋势图类型，默认 "line" |
 | `y_columns` | `list[str]` | 否 | 指定绘图数值列；不传时优先使用 `value`，否则自动检测数值列。`pie` 只使用第一个数值列 |
 | `y_axis_label` | `str` | 否 | 趋势图完整 y 轴名称和单位，如 `"Requests (rpm)"`；导出 PNG 会包含 |
-| `y_axis_unit` | `str` | 否 | 单 y 列趋势图的单位；多 y 列时不会自动套用 |
+| `y_axis_unit` | `str` | 否 | 趋势图 y 轴单位；单 y 列显示为 `列名 (单位)`，多 y 列仅在所有指标共享同一单位时使用 |
 | `title` | `str` | 否 | 标题，默认 "Dashboard" |
 
-单位规则：工具不会从数据值里猜单位。需要准确单位时优先传 `y_axis_label`，例如 `"Revenue (USD)"`。只有单个 y 列时才使用 `y_axis_unit` 自动组合为 `列名 (单位)`；多 y 列图表如果单位不同，必须用不含错误单位的 `y_axis_label` 或只显示列名。
+单位规则：工具不会从数据值里猜单位。需要准确单位时优先传 `y_axis_label`，例如 `"Revenue (USD)"`。单个 y 列会用 `y_axis_unit` 自动组合为 `列名 (单位)`；多个 y 列只有在所有指标共享同一单位时才传 `y_axis_unit`，图例开关后左侧标题会随当前可见指标更新。多 y 列单位不同则不要传共享单位，必要时用准确的 `y_axis_label`。
 
 ### render_analysis_dashboard
 
