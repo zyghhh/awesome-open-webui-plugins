@@ -54,6 +54,8 @@ description: 使用内置模板快速渲染 Open WebUI 内联可视化。四个�
 SQL + 解释 + 数据表预览。`columns` 和 `rows` 必填。
 
 - `columns`：使用有意义的名称，这些名称将显示为表头
+- `sql` / `sql_lines`：必须填写真实执行的数据查询 SQL，也就是实际产生 `rows` 的查询原文
+- 禁止填写示例 SQL、占位 SQL、伪 SQL、模型编造 SQL；如果拿不到真实执行 SQL，就省略 SQL
 - `sql`：单行 SQL 字符串，不要传 JSON 对象
 - `sql_lines`：多行 SQL 必须传这个，避免字符串转义不稳定。示例：`["SELECT a, b", "FROM t", "WHERE c=1"]`
 - `explanation`：最多 2 句话，不超过 80 字，不要用 markdown 或 HTML

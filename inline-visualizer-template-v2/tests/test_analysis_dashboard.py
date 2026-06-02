@@ -112,6 +112,15 @@ class AnalysisDashboardTest(unittest.TestCase):
             self.assertIn("AVOID JSON-wrapped SQL", text)
             self.assertIn('"sql": \'{"sql":"SELECT', text)
 
+    def test_sql_instructions_require_actual_executed_query(self):
+        module = load_tool_module()
+        skill = (Path(__file__).parent.parent / "SKILL.md").read_text(encoding="utf-8")
+
+        self.assertIn("actual executed query", module.__doc__)
+        self.assertIn("Do not invent, template, summarize, or add example SQL", module.__doc__)
+        self.assertIn("真实执行的数据查询 SQL", skill)
+        self.assertIn("禁止填写示例 SQL、占位 SQL、伪 SQL、模型编造 SQL", skill)
+
     def test_skill_limits_analysis_dashboard_to_explicit_multi_module_requests(self):
         skill = (Path(__file__).parent.parent / "SKILL.md").read_text(encoding="utf-8")
 

@@ -39,6 +39,8 @@ tool_instructions: |
   }
   columns: list of column name strings (required).
   rows: list of row objects (required). Keys must match columns.
+  sql/sql_lines MUST be the actual executed query that produced rows.
+    Do not invent, template, summarize, or add example SQL. If the actual query is unavailable, omit SQL.
   sql: raw SQL string (optional). Only for single-line SQL. Do NOT pass a JSON object.
   sql_lines: SQL as list of lines (required for multi-line SQL). Safer than "sql"
     because it avoids string-escaping instability. Example: ["SELECT a, b", "FROM t"].
