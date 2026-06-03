@@ -233,9 +233,7 @@ def _coerce_sql_text(sql: Any = "", sql_lines: Any = None) -> str:
 
     if isinstance(source, list):
         return "\n".join(
-            part
-            for part in (_coerce_sql_text(part) for part in source)
-            if part
+            part for part in (_coerce_sql_text(part) for part in source) if part
         ).strip()
 
     if isinstance(source, dict):
@@ -1014,6 +1012,21 @@ def _build_html(
   // Legend — unified configuration for all chart types
   // -------------------------------------------------------------------
 
+  function normalizeLegendLabels(chartType) {{
+    var defaultGenerator = Chart.defaults.plugins.legend.labels.generateLabels;
+    return function(chart) {{
+      var labels = defaultGenerator(chart);
+      labels.forEach(function(label) {{
+        if (chartType !== 'pie') {{
+          label.pointStyle = 'circle';
+          label.lineWidth = 0;
+          label.strokeStyle = label.fillStyle;
+        }}
+      }});
+      return labels;
+    }};
+  }}
+
   function buildLegendConfig(chartType, context) {{
     var textColor = getCssVar('--color-text-secondary');
     var base = {{
@@ -1022,26 +1035,23 @@ def _build_html(
         font: {{ size: 11 }},
         padding: 10,
         usePointStyle: true,
-        pointStyleWidth: 8,
+        pointStyle: 'circle',
         boxWidth: 8,
         boxHeight: 8,
       }}
     }};
 
+    if (chartType !== 'pie') {{
+      base.labels.generateLabels = normalizeLegendLabels(chartType);
+    }}
+
     if (context === 'pie') {{
       base.position = 'right';
       base.labels.padding = 14;
-      base.labels.pointStyle = 'rectRounded';
     }} else if (context === 'multi') {{
       base.position = 'top';
-      if (chartType === 'bar') {{
-        base.labels.pointStyle = 'rectRounded';
-      }} else {{
-        base.labels.pointStyle = 'circle';
-      }}
     }} else if (context === 'dashboard-pie') {{
       base.position = 'bottom';
-      base.labels.pointStyle = 'rectRounded';
     }}
 
     return base;

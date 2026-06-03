@@ -132,6 +132,52 @@ class DashboardTableTest(unittest.TestCase):
         self.assertIn("buildChartDatasets(series, yCols, isMulti, chartType", html)
         self.assertIn("buildChartDatasets(series, dashYCols, dashMulti, chartType", html)
 
+    def test_multi_series_legends_render_as_round_dots_for_chart_and_dashboard(self):
+        chart_html = self.render_chart_html(
+            series=[
+                {"month": "Jan", "revenue": 120, "users": 500},
+                {"month": "Feb", "revenue": 148, "users": 600},
+            ],
+            chart_type="bar",
+            title="Monthly Trend",
+        )
+        dashboard_html = self.render_dashboard_html(
+            metrics=[{"label": "Revenue", "value": "$120"}],
+            series=[
+                {"month": "Jan", "revenue": 120, "users": 500},
+                {"month": "Feb", "revenue": 148, "users": 600},
+            ],
+            chart_type="bar",
+            title="Revenue Dashboard",
+        )
+
+        for html in (chart_html, dashboard_html):
+            self.assertIn("function normalizeLegendLabels(chartType)", html)
+            self.assertIn("label.pointStyle = 'circle';", html)
+            self.assertIn("label.lineWidth = 0;", html)
+            self.assertIn("legendConfigWithYAxisSync('bar', 'multi'", html)
+            self.assertNotIn(
+                "if (chartType === 'bar') {\n        base.labels.pointStyle = 'rectRounded';",
+                html,
+            )
+
+    def test_pie_legends_keep_chartjs_slice_label_generator(self):
+        html = self.render_chart_html(
+            series=[
+                {"region": "East", "share": 42},
+                {"region": "West", "share": 31},
+                {"region": "North", "share": 27},
+            ],
+            chart_type="pie",
+            title="Load Share",
+        )
+
+        self.assertIn('"x_column":"region"', html)
+        self.assertIn("legend: buildLegendConfig('pie', 'pie')", html)
+        self.assertIn("if (chartType !== 'pie')", html)
+        self.assertIn("base.labels.generateLabels = normalizeLegendLabels(chartType);", html)
+        self.assertNotIn("generateLabels: normalizeLegendLabels(chartType),", html)
+
     def test_render_chart_accepts_rows_alias_after_data_detail(self):
         html = self.render_chart_html(
             rows=[
