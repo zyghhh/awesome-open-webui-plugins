@@ -13,6 +13,8 @@
 | [Inline Visualizer v2](inline-visualizer-v2/) | 工具 + 技能 | Classic298 | 流式实时渲染可视化引擎 — 逐token见证 HTML/SVG 绘制过程 |
 | [Inline Visualizer v3](inline-visualizer-v3/) | 工具 + 技能 | **Derek** | 新一代流式可视化，增强设计系统、双语技能支持、扩展桥接架构 |
 | [Inline Visualizer Template](inline-visualizer-template/) | 工具 + 技能 | **Derek** | 快速模板可视化 — 4 个自描述函数，扁平参数，零代码生成 |
+| [Inline Visualizer Template v2](inline-visualizer-template-v2/) | 工具 + 技能 | **Derek** | 适用于 Open WebUI 0.9.5 的回滚版本 |
+| [Inline Visualizer Template v3](inline-visualizer-template-v3/) | 工具 + 技能 | **Derek** | 适用于 Open WebUI 0.10.2+ 的消息级 Rich UI 嵌入版本 |
 | [Inline Visualizer v1](inline-visualizer/) | 工具 + 技能 | Classic298 | 传统静态渲染引擎 — 一次性 HTMLResponse 模式 |
 | [Email Composer](email-composer/) | 工具 | Classic298 | AI 驱动的邮件撰写，带富交互 UI 卡片 |
 | [MCP App Bridge](mcp-app-bridge/) | 工具 | Classic298 | 将 MCP 应用 (SEP-1865) 渲染为富 UI 嵌入 |
@@ -131,6 +133,14 @@ cp inline-visualizer-v3/SKILL.md → 工作区 → 技能（名称："visualize"
 # Template — 快速模板图表和仪表盘
 cp inline-visualizer-template/tool.py → 工作区 → 工具
 cp inline-visualizer-template/SKILL.md → 工作区 → 技能（名称："visual_template"）
+
+# Template v2 — Open WebUI 0.9.5 回滚版本
+cp inline-visualizer-template-v2/tool.py → 工作区 → 工具
+cp inline-visualizer-template-v2/SKILL.md → 工作区 → 技能（名称："inline-visualizer-template-v2"）
+
+# Template v3 — Open WebUI 0.10.2+ 消息级嵌入版本
+cp inline-visualizer-template-v3/tool.py → 工作区 → 工具
+cp inline-visualizer-template-v3/SKILL.md → 工作区 → 技能（名称："inline-visualizer-template-v3"）
 ```
 
 **必须设置：** 在 Open WebUI 设置 → 界面中启用 **允许 iframe 同源**（v2 和 v3 流式模式必需）。

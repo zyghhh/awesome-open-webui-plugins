@@ -1,0 +1,296 @@
+import asyncio
+import importlib.util
+from pathlib import Path
+import sys
+import types
+import unittest
+
+
+TOOL_PATH = Path(__file__).parent.parent / "tool.py"
+
+
+def load_tool_module():
+    fastapi = types.ModuleType("fastapi")
+    fastapi_responses = types.ModuleType("fastapi.responses")
+
+    class HTMLResponse:
+        def __init__(self, content="", headers=None):
+            self.body = content.encode("utf-8")
+            self.headers = headers or {}
+
+    fastapi_responses.HTMLResponse = HTMLResponse
+    sys.modules.setdefault("fastapi", fastapi)
+    sys.modules.setdefault("fastapi.responses", fastapi_responses)
+
+    pydantic = types.ModuleType("pydantic")
+
+    class BaseModel:
+        pass
+
+    def Field(default=None, **_kwargs):
+        return default
+
+    pydantic.BaseModel = BaseModel
+    pydantic.Field = Field
+    sys.modules.setdefault("pydantic", pydantic)
+
+    spec = importlib.util.spec_from_file_location("ivt_tool", TOOL_PATH)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+class DashboardTableTest(unittest.TestCase):
+    def render_data_detail_html(self, **kwargs):
+        module = load_tool_module()
+        tool = module.Tools()
+        response, _ = asyncio.run(tool.render_data_detail(**kwargs))
+        return response.body.decode("utf-8")
+
+    def render_chart_html(self, **kwargs):
+        module = load_tool_module()
+        tool = module.Tools()
+        response, _ = asyncio.run(tool.render_chart(**kwargs))
+        return response.body.decode("utf-8")
+
+    def render_dashboard_html(self, **kwargs):
+        module = load_tool_module()
+        tool = module.Tools()
+        response, _ = asyncio.run(tool.render_dashboard(**kwargs))
+        return response.body.decode("utf-8")
+
+    def test_dashboard_table_chart_type_renders_table_branch(self):
+        html = self.render_dashboard_html(
+            metrics=[{"label": "Revenue", "value": "$120"}],
+            series=[
+                {"label": "Jan", "value": 120},
+                {"label": "Feb", "value": 148},
+            ],
+            chart_type="table",
+            title="Revenue Dashboard",
+        )
+
+        self.assertIn('"chartType":"table"', html)
+        self.assertIn("if (chartType === 'table')", html)
+        self.assertIn("renderDashboardTable(series, dashXCol, dashYCols)", html)
+        self.assertNotIn("if (chartType === 'table') { chartType = 'line'; }", html)
+
+    def test_data_detail_parses_json_wrapped_sql_before_normalizing_newlines(self):
+        html = self.render_data_detail_html(
+            columns=["month", "revenue"],
+            rows=[{"month": "Jan", "revenue": 120}],
+            sql='{"sql":"SELECT month, revenue\\nFROM sales\\nORDER BY month"}',
+            title="Sales Data",
+        )
+
+        self.assertIn('"sql":"SELECT month, revenue\\nFROM sales\\nORDER BY month"', html)
+        self.assertNotIn('"{\\"sql\\":\\"SELECT month', html)
+
+    def test_dashboard_multi_series_auto_detects_x_and_y_columns(self):
+        html = self.render_dashboard_html(
+            metrics=[{"label": "Revenue", "value": "$120"}],
+            series=[
+                {"month": "Jan", "revenue": 120, "users": 500},
+                {"month": "Feb", "revenue": 148, "users": 600},
+            ],
+            chart_type="line",
+            title="Revenue Dashboard",
+        )
+
+        self.assertIn('"x_column":"month"', html)
+        self.assertIn('"y_columns":["revenue","users"]', html)
+        self.assertIn('"month":"Jan","revenue":120,"users":500', html)
+
+    def test_dashboard_single_series_keeps_label_value_compatibility(self):
+        html = self.render_dashboard_html(
+            metrics=[{"label": "Revenue", "value": "$120"}],
+            series=[
+                {"label": "Jan", "value": 120},
+                {"label": "Feb", "value": 148},
+            ],
+            chart_type="bar",
+            title="Revenue Dashboard",
+        )
+
+        self.assertIn('"x_column":"label"', html)
+        self.assertIn('"y_columns":["value"]', html)
+        self.assertIn('"label":"Jan","value":120', html)
+
+    def test_chart_and_dashboard_share_dataset_builder(self):
+        html = self.render_dashboard_html(
+            metrics=[{"label": "Revenue", "value": "$120"}],
+            series=[
+                {"month": "Jan", "revenue": 120, "users": 500},
+                {"month": "Feb", "revenue": 148, "users": 600},
+            ],
+            chart_type="line",
+            title="Revenue Dashboard",
+        )
+
+        self.assertIn("function buildChartDatasets(", html)
+        self.assertIn("buildChartDatasets(series, yCols, isMulti, chartType", html)
+        self.assertIn("buildChartDatasets(series, dashYCols, dashMulti, chartType", html)
+
+    def test_multi_series_legends_render_as_round_dots_for_chart_and_dashboard(self):
+        chart_html = self.render_chart_html(
+            series=[
+                {"month": "Jan", "revenue": 120, "users": 500},
+                {"month": "Feb", "revenue": 148, "users": 600},
+            ],
+            chart_type="bar",
+            title="Monthly Trend",
+        )
+        dashboard_html = self.render_dashboard_html(
+            metrics=[{"label": "Revenue", "value": "$120"}],
+            series=[
+                {"month": "Jan", "revenue": 120, "users": 500},
+                {"month": "Feb", "revenue": 148, "users": 600},
+            ],
+            chart_type="bar",
+            title="Revenue Dashboard",
+        )
+
+        for html in (chart_html, dashboard_html):
+            self.assertIn("function normalizeLegendLabels(chartType)", html)
+            self.assertIn("label.pointStyle = 'circle';", html)
+            self.assertIn("label.lineWidth = 0;", html)
+            self.assertIn("legendConfigWithYAxisSync('bar', 'multi'", html)
+            self.assertNotIn(
+                "if (chartType === 'bar') {\n        base.labels.pointStyle = 'rectRounded';",
+                html,
+            )
+
+    def test_pie_legends_keep_chartjs_slice_label_generator(self):
+        html = self.render_chart_html(
+            series=[
+                {"region": "East", "share": 42},
+                {"region": "West", "share": 31},
+                {"region": "North", "share": 27},
+            ],
+            chart_type="pie",
+            title="Load Share",
+        )
+
+        self.assertIn('"x_column":"region"', html)
+        self.assertIn("legend: buildLegendConfig('pie', 'pie')", html)
+        self.assertIn("if (chartType !== 'pie')", html)
+        self.assertIn("base.labels.generateLabels = normalizeLegendLabels(chartType);", html)
+        self.assertNotIn("generateLabels: normalizeLegendLabels(chartType),", html)
+
+    def test_render_chart_accepts_rows_alias_after_data_detail(self):
+        html = self.render_chart_html(
+            rows=[
+                {"month": "Jan", "revenue": 120},
+                {"month": "Feb", "revenue": 148},
+            ],
+            chart_type="line",
+            title="Monthly Revenue",
+        )
+
+        self.assertIn('"series":[{"month":"Jan","revenue":120},{"month":"Feb","revenue":148}]', html)
+        self.assertIn('"x_column":"month"', html)
+        self.assertIn('"y_columns":["revenue"]', html)
+
+    def test_render_chart_uses_explicit_y_axis_label(self):
+        html = self.render_chart_html(
+            series=[
+                {"month": "Jan", "revenue": 120},
+                {"month": "Feb", "revenue": 148},
+            ],
+            chart_type="line",
+            y_axis_label="Revenue (USD)",
+            title="Monthly Revenue",
+        )
+
+        self.assertIn('"y_axis_label":"Revenue (USD)"', html)
+        self.assertIn("function yScaleOptions(yAxisLabel, textColor, gridColor)", html)
+        self.assertIn("title: {", html)
+        self.assertIn("text: yAxisLabel", html)
+        self.assertIn("y: yScaleOptions(yAxisLabel, textColor, gridColor)", html)
+
+    def test_y_axis_title_reserves_left_space_away_from_plot_area(self):
+        html = self.render_chart_html(
+            series=[
+                {"province": "江苏电网", "peak_gap": 4329.9},
+                {"province": "浙江电网", "peak_gap": 3600.0},
+            ],
+            chart_type="bar",
+            y_axis_unit="MW",
+            title="Peak Gap",
+        )
+
+        self.assertIn("afterFit: reserveYAxisTitleSpace", html)
+        self.assertIn("function reserveYAxisTitleSpace(scale)", html)
+        self.assertIn("scale.width = Math.max(scale.width, 58)", html)
+        self.assertIn("ticks: { color: textColor, font: {size:11}, padding: 8 }", html)
+        self.assertIn("padding: { top: 0, bottom: 12 }", html)
+        self.assertIn("function chartLayoutOptions(yAxisLabel, compact)", html)
+        self.assertIn("left: yAxisLabel ? (compact ? 10 : 14) : 8", html)
+        self.assertIn("layout: chartLayoutOptions(yAxisLabel, false)", html)
+
+    def test_render_chart_avoids_line_start_array_literal_for_iframe_compatibility(self):
+        html = self.render_chart_html(
+            series=[
+                {"label": "00:00", "value": 120},
+                {"label": "00:15", "value": 148},
+            ],
+            chart_type="line",
+            title="Load Curve",
+        )
+
+        self.assertNotIn("\n    [10, 20, 50, 100].forEach", html)
+        self.assertIn("var pageSizes = [10, 20, 50, 100];", html)
+        self.assertIn("pageSizes.forEach(function(s)", html)
+
+    def test_render_chart_combines_single_y_column_with_explicit_unit(self):
+        html = self.render_chart_html(
+            series=[
+                {"time": "00:00", "requests": 120},
+                {"time": "01:00", "requests": 148},
+            ],
+            chart_type="bar",
+            y_axis_unit="rpm",
+            title="Request Rate",
+        )
+
+        self.assertIn('"y_columns":["requests"]', html)
+        self.assertIn('"y_axis_label":"requests (rpm)"', html)
+
+    def test_render_chart_does_not_apply_unit_to_multiple_y_columns(self):
+        html = self.render_chart_html(
+            series=[
+                {"month": "Jan", "revenue": 120, "users": 500},
+                {"month": "Feb", "revenue": 148, "users": 600},
+            ],
+            chart_type="line",
+            y_columns=["revenue", "users"],
+            y_axis_unit="USD",
+            title="Revenue and Users",
+        )
+
+        self.assertIn('"y_columns":["revenue","users"]', html)
+        self.assertIn('"y_axis_label":""', html)
+        self.assertIn('"y_axis_unit":"USD"', html)
+        self.assertNotIn('"y_axis_label":"revenue (USD), users (USD)"', html)
+
+    def test_render_dashboard_applies_same_y_axis_label_rules(self):
+        html = self.render_dashboard_html(
+            metrics=[{"label": "Peak", "value": "5,677 rpm"}],
+            series=[
+                {"time": "00:00", "requests": 120},
+                {"time": "01:00", "requests": 148},
+            ],
+            chart_type="line",
+            y_axis_label="Requests (rpm)",
+            title="Traffic Dashboard",
+        )
+
+        self.assertIn('"y_axis_label":"Requests (rpm)"', html)
+        self.assertIn("var dashAxisMeta = axisMetaFromData(data, dashYCols);", html)
+        self.assertIn("var dashYAxisLabel = initialYAxisTitle(dashAxisMeta, dashYCols);", html)
+        self.assertIn("y: yScaleOptions(dashYAxisLabel, textColor, gridColor)", html)
+
+
+if __name__ == "__main__":
+    unittest.main()

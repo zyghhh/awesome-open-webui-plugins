@@ -13,6 +13,8 @@ A curated collection of plugins for [Open WebUI](https://github.com/open-webui/o
 | [Inline Visualizer v2](inline-visualizer-v2/) | Tool + Skill | Classic298 | Streaming live-render visualization engine — watch HTML/SVG paint token-by-token |
 | [Inline Visualizer v3](inline-visualizer-v3/) | Tool + Skill | **Derek** | Next-gen streaming visualizer with enhanced design system, bilingual skill support, and expanded bridge architecture |
 | [Inline Visualizer Template](inline-visualizer-template/) | Tool + Skill | **Derek** | Rapid template-based visualization — 4 self-describing functions, flat parameters, zero code generation |
+| [Inline Visualizer Template v2](inline-visualizer-template-v2/) | Tool + Skill | **Derek** | Rollback template release for Open WebUI 0.9.5 |
+| [Inline Visualizer Template v3](inline-visualizer-template-v3/) | Tool + Skill | **Derek** | Message-level Rich UI embeds for Open WebUI 0.10.2+ |
 | [Inline Visualizer v1](inline-visualizer/) | Tool + Skill | Classic298 | Legacy static render engine — one-shot HTMLResponse mode |
 | [Email Composer](email-composer/) | Tool | Classic298 | AI-powered email drafting with rich UI card |
 | [MCP App Bridge](mcp-app-bridge/) | Tool | Classic298 | Renders MCP Apps (SEP-1865) as Rich UI embeds |
@@ -131,6 +133,14 @@ cp inline-visualizer-v3/SKILL.md → Workspace → Skills (name: "visualize")
 # Template — Rapid templated charts & dashboards
 cp inline-visualizer-template/tool.py → Workspace → Tools
 cp inline-visualizer-template/SKILL.md → Workspace → Skills (name: "visual_template")
+
+# Template v2 — Open WebUI 0.9.5 rollback release
+cp inline-visualizer-template-v2/tool.py → Workspace → Tools
+cp inline-visualizer-template-v2/SKILL.md → Workspace → Skills (name: "inline-visualizer-template-v2")
+
+# Template v3 — Open WebUI 0.10.2+ message-level embeds
+cp inline-visualizer-template-v3/tool.py → Workspace → Tools
+cp inline-visualizer-template-v3/SKILL.md → Workspace → Skills (name: "inline-visualizer-template-v3")
 ```
 
 **Required:** Enable **Allow iframe same origin** in Open WebUI Settings → Interface (required for v2 and v3 streaming mode).
