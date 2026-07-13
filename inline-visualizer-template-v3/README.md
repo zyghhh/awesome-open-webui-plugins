@@ -12,11 +12,11 @@
 
 ## 设计理念
 
-v3 的 `render_visual_template` 只有一个函数，通过 `template` 枚举 + 嵌套 `data` 字典来区分可视化类型。模型看到 `data: Optional[Dict[str, Any]]` 无法理解具体结构，容易传错格式。
+旧版单函数原型的 `render_visual_template` 通过 `template` 枚举 + 嵌套 `data` 字典来区分可视化类型。模型看到 `data: Optional[Dict[str, Any]]` 无法理解具体结构，容易传错格式。
 
-v4 拆分为四个独立函数，每个函数的参数即 schema：
+当前 Template 插件拆分为四个独立函数，每个函数的参数即 schema：
 
-| 维度 | v3 (旧) | v4 (新) |
+| 维度 | 旧版单函数原型 | 当前 Template 插件 |
 |------|---------|---------|
 | 函数数量 | 1 个通用函数 | 4 个独立函数 |
 | 参数设计 | 嵌套 `data` dict | 扁平类型参数 |
@@ -123,7 +123,7 @@ SQL + 解释 + 数据表预览。
 
 ## 与 inline-visualizer-v3 的关系
 
-| 维度 | v3 | template v4 |
+| 维度 | inline-visualizer-v3 | Template 插件 |
 |------|-----|----------|
 | 渲染引擎 | 模型生成 HTML + Chart.js | 工具内置 Chart.js |
 | 模型负担 | 需生成完整 HTML/CSS/JS | 只需扁平 JSON 参数 |

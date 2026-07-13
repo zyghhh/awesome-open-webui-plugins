@@ -65,9 +65,9 @@ Independently developed by **Derek**, v3 evolves the streaming architecture with
 
 Independently developed by **Derek**, this plugin takes a fundamentally different approach: instead of having the model generate HTML/CSS/JS from scratch, it provides **4 self-describing functions** with flat parameter signatures. The model passes structured JSON data, and the tool handles all rendering internally using Chart.js.
 
-**Design philosophy:** v3's `render_visual_template` uses a single function with a `template` enum + nested `data` dict. Models see `data: Optional[Dict[str, Any]]` and cannot understand the expected structure. Template v4 (this plugin) splits into 4 independent functions where **each function's parameters ARE its schema** — models understand the contract directly from the function signature.
+**Design philosophy:** the earlier single-function prototype of `render_visual_template` uses a `template` enum + nested `data` dict. Models see `data: Optional[Dict[str, Any]]` and cannot understand the expected structure. The Template plugin splits this into 4 independent functions where **each function's parameters ARE its schema** — models understand the contract directly from the function signature.
 
-| Dimension | v3 (generic function) | Template (4 functions) |
+| Dimension | Earlier single-function prototype | Template (4 functions) |
 |-----------|----------------------|------------------------|
 | Function count | 1 generic function | 4 independent functions |
 | Parameter design | Nested `data` dict | Flat typed parameters |
