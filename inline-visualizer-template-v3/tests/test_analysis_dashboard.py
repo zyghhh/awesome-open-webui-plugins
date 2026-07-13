@@ -101,6 +101,29 @@ class AnalysisDashboardTest(unittest.TestCase):
         self.assertIn("y_axis_unit", module.__doc__)
         self.assertIn("Never guess units from values", module.__doc__)
 
+    def test_skill_and_tool_instructions_define_per_turn_render_budgets(self):
+        module = load_tool_module()
+        skill = (Path(__file__).parent.parent / "SKILL.md").read_text(encoding="utf-8")
+
+        self.assertIn(
+            "description: 使用内置模板快速渲染 Open WebUI 内联可视化。"
+            "四个自描述函数：render_data_detail（数据详情）、render_chart（图表）、"
+            "render_dashboard（轻量仪表盘）、render_analysis_dashboard（综合分析看板）。"
+            "模型传入扁平参数，Chart.js 渲染由工具内置完成。",
+            skill,
+        )
+        self.assertIn("### 每轮调用预算", skill)
+        self.assertIn("`detail_budget = 1`", skill)
+        self.assertIn("`final_visualization_budget = 1`", skill)
+        self.assertIn("本轮不得再次调用、补充调用或切换到另一个最终可视化函数", skill)
+        self.assertIn("只有下一条用户消息才能开始新的预算周期", skill)
+
+        self.assertIn("Per-turn render budget", module.__doc__)
+        self.assertIn("detail_budget = 1", module.__doc__)
+        self.assertIn("final_visualization_budget = 1", module.__doc__)
+        self.assertIn("do not call, supplement, or switch", module.__doc__)
+        self.assertIn("Only a new user message resets both budgets", module.__doc__)
+
     def test_sql_instructions_include_few_shot_examples(self):
         module = load_tool_module()
         skill = (Path(__file__).parent.parent / "SKILL.md").read_text(encoding="utf-8")

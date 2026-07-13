@@ -18,6 +18,19 @@ description: 使用内置模板快速渲染 Open WebUI 内联可视化。四个�
 5. **禁止同时调用两种 dashboard**（`render_dashboard` + `render_analysis_dashboard`），它们互斥
 6. **多轮对话中，每一次重新进行数据查询并可视化，都必须执行 `render_data_detail` → 恰好一个图表/看板函数**
 
+### 每轮调用预算
+
+“本轮”指从最新一条用户消息开始，到当前助手回答结束。每条新用户消息开始时，重新初始化以下预算：
+
+- `detail_budget = 1`
+- `final_visualization_budget = 1`
+
+`render_data_detail` 成功返回后消耗 `detail_budget`。
+
+`render_chart`、`render_dashboard`、`render_analysis_dashboard` 共享 `final_visualization_budget`；其中任意一个成功返回后，该预算立即耗尽，本轮不得再次调用、补充调用或切换到另一个最终可视化函数。
+
+数据库查询、任务更新和其他非 `render_*` 工具不计入预算，也不会重置预算。只有下一条用户消息才能开始新的预算周期。
+
 ### 函数选择
 
 | 用户意图 | 使用函数 | 何时不能用 |

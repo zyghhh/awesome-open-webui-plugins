@@ -18,6 +18,15 @@ tool_instructions: |
      Never call two dashboard functions (render_dashboard + render_analysis_dashboard) together.
   3. In multi-turn conversations, every time a response performs data query and visualization,
      repeat this sequence: render_data_detail first, then at most one visualization function.
+
+  Per-turn render budget:
+  - A turn starts with the latest user message and ends with the current assistant response.
+  - detail_budget = 1 for render_data_detail.
+  - final_visualization_budget = 1 shared by render_chart, render_dashboard, and render_analysis_dashboard.
+  - A successful call consumes its budget. Once the shared final budget is consumed, do not call, supplement, or switch to another final visualization in the same turn.
+  - Query, task, and other non-render tools neither consume nor reset these budgets.
+  - Only a new user message resets both budgets.
+
   4. Do not use render_analysis_dashboard for simple trend, bar, pie, table, or single-chart requests.
   5. Always pass y_axis_label when the y-axis meaning is clear, e.g. "Revenue (USD)".
      Always pass y_axis_unit when there is a single y-column with a known unit, e.g. "rpm".
@@ -154,6 +163,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 _BUILD = "0.6.0"
+_MESSAGE_EMBEDS_METADATA_KEY = "_inline_visualizer_template_v3_embeds"
 
 ChartType = Literal["line", "bar", "pie", "table"]
 DashChartType = Literal["line", "bar", "pie", "table"]
@@ -2015,6 +2025,7 @@ async def _deliver_render_response(
     show_stats: bool,
     label: str,
     __event_emitter__: Any = None,
+    __metadata__: Any = None,
 ) -> Any:
     """Emit message-level HTML when possible, with the legacy tuple as fallback."""
     response, context = _render_response(
@@ -2027,15 +2038,42 @@ async def _deliver_render_response(
     )
 
     if callable(__event_emitter__):
+        html_content = response.body.decode("utf-8", "replace")
+        embeds = [html_content]
+        metadata = __metadata__ if isinstance(__metadata__, dict) else None
+        embed_state = {}
+
+        if metadata is not None:
+            pending_state = metadata.get(_MESSAGE_EMBEDS_METADATA_KEY)
+            if isinstance(pending_state, dict):
+                embed_state = {
+                    key: value
+                    for key, value in pending_state.items()
+                    if key in ("data_detail", "visualization")
+                    and isinstance(value, str)
+                }
+
+            slot = "data_detail" if template == "data_detail" else "visualization"
+            embed_state[slot] = html_content
+            embeds = [
+                embed_state[key]
+                for key in ("data_detail", "visualization")
+                if key in embed_state
+            ]
+
         await __event_emitter__(
             {
                 "type": "embeds",
                 "data": {
-                    "embeds": [response.body.decode("utf-8", "replace")],
-                    "replace": False,
+                    "embeds": embeds,
+                    "replace": True,
                 },
             }
         )
+
+        if metadata is not None:
+            metadata[_MESSAGE_EMBEDS_METADATA_KEY] = embed_state
+
         return context
 
     return response, context
@@ -2071,6 +2109,7 @@ class Tools:
         explanation: str = "",
         title: str = "Data Detail",
         __event_emitter__: Any = None,
+        __metadata__: Any = None,
     ) -> Any:
         """
         Render a data detail view with optional SQL, explanation, and data table.
@@ -2124,6 +2163,7 @@ class Tools:
             show_stats=self.valves.show_stats,
             label="Data detail",
             __event_emitter__=__event_emitter__,
+            __metadata__=__metadata__,
         )
 
     # ================================================================
@@ -2140,6 +2180,7 @@ class Tools:
         y_axis_label: str = "",
         y_axis_unit: str = "",
         __event_emitter__: Any = None,
+        __metadata__: Any = None,
     ) -> Any:
         """
         Render a chart: line, bar, pie (doughnut), or table.
@@ -2284,6 +2325,7 @@ class Tools:
             show_stats=self.valves.show_stats,
             label=f"Chart ({len(resolved_y)} series)",
             __event_emitter__=__event_emitter__,
+            __metadata__=__metadata__,
         )
 
     # ================================================================
@@ -2301,6 +2343,7 @@ class Tools:
         y_axis_label: str = "",
         y_axis_unit: str = "",
         __event_emitter__: Any = None,
+        __metadata__: Any = None,
     ) -> Any:
         """
         Render a dashboard with KPI metric cards and an optional trend chart.
@@ -2452,6 +2495,7 @@ class Tools:
             show_stats=self.valves.show_stats,
             label=f"Dashboard ({metric_count} metrics)",
             __event_emitter__=__event_emitter__,
+            __metadata__=__metadata__,
         )
 
     # ================================================================
@@ -2467,6 +2511,7 @@ class Tools:
         subtitle: str = "",
         title: str = "Analysis Dashboard",
         __event_emitter__: Any = None,
+        __metadata__: Any = None,
     ) -> Any:
         """
         Render a fixed-layout, configurable-semantics analysis dashboard.
@@ -2569,4 +2614,5 @@ class Tools:
             show_stats=self.valves.show_stats,
             label="Analysis dashboard",
             __event_emitter__=__event_emitter__,
+            __metadata__=__metadata__,
         )

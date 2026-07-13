@@ -28,8 +28,9 @@ class VersionCompatibilityTest(unittest.TestCase):
         tool_source = (ROOT / "tool.py").read_text(encoding="utf-8")
 
         self.assertIn('"type": "embeds"', tool_source)
-        self.assertIn('"replace": False', tool_source)
+        self.assertIn('"replace": True', tool_source)
         self.assertEqual(len(re.findall(r"__event_emitter__: Any = None", tool_source)), 5)
+        self.assertEqual(len(re.findall(r"__metadata__: Any = None", tool_source)), 5)
 
 
 if __name__ == "__main__":
